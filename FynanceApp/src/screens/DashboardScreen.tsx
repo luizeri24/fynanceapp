@@ -1,18 +1,13 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { ScrollView, StyleSheet, View, RefreshControl } from 'react-native';
 import { Card, Text, Divider, FAB, useTheme, Button, IconButton, Chip } from 'react-native-paper';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
 import BalanceCard from '../components/dashboard/BalanceCard';
 import CreditCardSummary from '../components/dashboard/CreditCardSummary';
 import SpendingLimit from '../components/dashboard/SpendingLimit';
 import TransactionItem from '../components/common/TransactionItem';
-import pluggyService, { PluggyAccount } from '../services/pluggyService';
-import { 
-  mockAccounts, 
-  mockCreditCards, 
-  mockTransactions 
-} from '../data/mockData';
+import pluggyService, { PluggyAccount, PluggyTransaction } from '../services/pluggyService';
 import { RootStackParamList } from '../types';
 
 type DashboardScreenNavigationProp = StackNavigationProp<RootStackParamList>;
@@ -23,10 +18,13 @@ const DashboardScreen = () => {
   
   // Estados para Open Finance
   const [openFinanceAccounts, setOpenFinanceAccounts] = useState<PluggyAccount[]>([]);
+  const [openFinanceTransactions, setOpenFinanceTransactions] = useState<PluggyTransaction[]>([]);
+  const [ownerName, setOwnerName] = useState<string>('');
   const [isLoadingOpenFinance, setIsLoadingOpenFinance] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
   
-  const recentTransactions = mockTransactions
+  // Pegar as 5 transações mais recentes
+  const recentTransactions = openFinanceTransactions
     .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
     .slice(0, 5);
 
@@ -58,23 +56,42 @@ const DashboardScreen = () => {
   const loadOpenFinanceData = async () => {
     try {
       console.log('📊 Dashboard: Carregando dados do cache local...');
-      // Só carrega dados do cache local, não tenta fazer requisições à API
-      // pois precisamos de um usuário autenticado via PluggyConnect
+      
+      // Carregar items
       const cachedItems = await pluggyService.getCachedItems();
       console.log('📊 Dashboard: Items em cache:', cachedItems.length);
       
       if (cachedItems.length > 0) {
-        // Se há items em cache, tenta carregar as contas também do cache
+        // Carregar contas do cache
         const cachedAccounts = await pluggyService.getCachedAccounts();
         setOpenFinanceAccounts(cachedAccounts);
         console.log('📊 Dashboard: Contas em cache:', cachedAccounts.length);
+        
+        // Extrair nome do titular da primeira conta
+        if (cachedAccounts.length > 0) {
+          // @ts-ignore - owner pode existir
+          const owner = cachedAccounts[0].owner || '';
+          if (owner) {
+            // Pegar apenas o primeiro nome
+            const firstName = owner.split(' ')[0];
+            setOwnerName(firstName);
+            console.log('👤 Nome do titular:', firstName);
+          }
+        }
+        
+        // Carregar transações do cache
+        const cachedTransactions = await pluggyService.getCachedTransactions();
+        setOpenFinanceTransactions(cachedTransactions);
+        console.log('📊 Dashboard: Transações em cache:', cachedTransactions.length);
       } else {
         setOpenFinanceAccounts([]);
+        setOpenFinanceTransactions([]);
         console.log('📊 Dashboard: Nenhum dado em cache. Conecte uma conta bancária primeiro.');
       }
     } catch (error) {
       console.error('📊 Dashboard: Erro ao carregar cache:', error);
       setOpenFinanceAccounts([]);
+      setOpenFinanceTransactions([]);
     }
   };
 
@@ -90,14 +107,19 @@ const DashboardScreen = () => {
     loadOpenFinanceData();
   }, []);
 
+  // Recarregar dados sempre que a tela ganhar foco
+  useFocusEffect(
+    useCallback(() => {
+      loadOpenFinanceData();
+    }, [])
+  );
+
   // Calcular saldo total das contas Open Finance
   const getTotalOpenFinanceBalance = () => {
     return openFinanceAccounts.reduce((total, account) => {
-      const balance = account.balances.find(b => b.balanceType === 'INTERIM_AVAILABLE') || 
-                     account.balances.find(b => b.balanceType === 'AVAILABLE') ||
-                     account.balances[0];
-      if (balance) {
-        return total + parseFloat(balance.balanceAmount.amount);
+      // A API do Pluggy retorna balance diretamente como número
+      if (account.balance) {
+        return total + account.balance;
       }
       return total;
     }, 0);
@@ -124,9 +146,16 @@ const DashboardScreen = () => {
       >
         {/* Header with notifications */}
         <View style={styles.header}>
-          <Text variant="headlineSmall" style={styles.welcomeText}>
-            Olá! 👋
-          </Text>
+          <View>
+            <Text variant="headlineSmall" style={styles.welcomeText}>
+              Olá{ownerName ? `, ${ownerName}` : ''}! 👋
+            </Text>
+            {ownerName && (
+              <Text variant="bodySmall" style={styles.welcomeSubtext}>
+                Bem-vindo ao seu painel financeiro
+              </Text>
+            )}
+          </View>
           <IconButton
             icon="bell"
             size={24}
@@ -135,7 +164,7 @@ const DashboardScreen = () => {
           />
         </View>
 
-        <BalanceCard accounts={mockAccounts} />
+        <BalanceCard accounts={openFinanceAccounts} />
 
         {/* Open Finance Accounts Section */}
         {openFinanceAccounts.length > 0 && (
@@ -158,32 +187,30 @@ const DashboardScreen = () => {
               </Text>
 
               {openFinanceAccounts.slice(0, 2).map((account, index) => {
-                const balance = account.balances.find(b => b.balanceType === 'INTERIM_AVAILABLE') || 
-                               account.balances.find(b => b.balanceType === 'AVAILABLE') ||
-                               account.balances[0];
-                
                 return (
-                  <View key={account.accountId} style={styles.accountItem}>
+                  <View key={account.id} style={styles.accountItem}>
                     <View style={styles.accountInfo}>
                       <Text variant="bodyMedium" style={styles.accountName}>
-                        {account.nickname || account.account.name}
+                        {account.name}
                       </Text>
                       <Text variant="bodySmall" style={styles.accountNumber}>
-                        {account.account.identification}
+                        {account.number || account.id.substring(0, 8)}
                       </Text>
                     </View>
                     <View style={styles.accountBalance}>
                       <Text variant="bodyLarge" style={styles.balanceAmount}>
-                        {balance ? formatBalance(parseFloat(balance.balanceAmount.amount)) : 'N/A'}
+                        {formatBalance(account.balance || 0)}
                       </Text>
                       <Chip 
                         style={[
                           styles.accountTypeChip,
-                          { backgroundColor: account.accountType === 'CACC' ? '#2196f3' : '#4caf50' }
+                          { backgroundColor: account.type === 'BANK' ? '#2196f3' : '#9c27b0' }
                         ]}
                         textStyle={styles.accountTypeText}
                       >
-                        {account.accountType === 'CACC' ? 'Corrente' : 'Poupança'}
+                        {account.type === 'BANK' 
+                          ? (account.subtype === 'CHECKING_ACCOUNT' ? 'Corrente' : 'Poupança')
+                          : 'Cartão'}
                       </Chip>
                     </View>
                   </View>
@@ -204,9 +231,7 @@ const DashboardScreen = () => {
           </Card>
         )}
         
-        <CreditCardSummary creditCards={mockCreditCards} />
-        
-        <SpendingLimit transactions={mockTransactions} />
+        {/* Remover dados mockados - usar apenas dados reais do Pluggy */}
 
         {/* Quick Actions */}
         <Card style={styles.quickActionsCard}>
@@ -236,6 +261,26 @@ const DashboardScreen = () => {
               
               <Button
                 mode="outlined"
+                onPress={() => navigation.navigate('Investments')}
+                icon="chart-line-variant"
+                style={styles.quickActionButton}
+              >
+                Investimentos
+              </Button>
+              
+              <Button
+                mode="outlined"
+                onPress={() => navigation.navigate('Loans')}
+                icon="cash-multiple"
+                style={styles.quickActionButton}
+              >
+                Empréstimos
+              </Button>
+            </View>
+            
+            <View style={styles.quickActionsGrid}>
+              <Button
+                mode="outlined"
                 onPress={handleNavigateToNotifications}
                 icon="bell"
                 style={styles.quickActionButton}
@@ -255,25 +300,53 @@ const DashboardScreen = () => {
           </Card.Content>
         </Card>
         
-        <Card style={styles.transactionsCard}>
-          <Card.Content>
-            <Text variant="titleMedium" style={styles.transactionsTitle}>
-              Transações Recentes
-            </Text>
-            {recentTransactions.map((transaction, index) => (
-              <React.Fragment key={transaction.id}>
-                <TransactionItem 
-                  transaction={transaction}
-                  onPress={() => {
-                    // TODO: Navigate to transaction details
-                    console.log('Transaction pressed:', transaction.id);
-                  }}
-                />
-                {index < recentTransactions.length - 1 && <Divider />}
-              </React.Fragment>
-            ))}
-          </Card.Content>
-        </Card>
+        {/* Transações Recentes - Dados Reais do Pluggy */}
+        {openFinanceTransactions.length > 0 && (
+          <Card style={styles.transactionsCard}>
+            <Card.Content>
+              <Text variant="titleMedium" style={styles.transactionsTitle}>
+                💸 Transações Recentes
+              </Text>
+              {recentTransactions.map((transaction, index) => (
+                <React.Fragment key={transaction.id}>
+                  <View style={styles.transactionItem}>
+                    <View style={styles.transactionInfo}>
+                      <Text variant="bodyMedium" style={styles.transactionDescription}>
+                        {transaction.description}
+                      </Text>
+                      <Text variant="bodySmall" style={styles.transactionDate}>
+                        {new Date(transaction.date).toLocaleDateString('pt-BR')}
+                      </Text>
+                    </View>
+                    <Text 
+                      variant="bodyLarge" 
+                      style={[
+                        styles.transactionAmount,
+                        { color: transaction.amount < 0 ? '#f44336' : '#4caf50' }
+                      ]}
+                    >
+                      {new Intl.NumberFormat('pt-BR', {
+                        style: 'currency',
+                        currency: 'BRL'
+                      }).format(Math.abs(transaction.amount))}
+                    </Text>
+                  </View>
+                  {index < recentTransactions.length - 1 && <Divider />}
+                </React.Fragment>
+              ))}
+              
+              {openFinanceTransactions.length > 5 && (
+                <Button
+                  mode="text"
+                  onPress={() => navigation.navigate('Transactions')}
+                  style={{ marginTop: 8 }}
+                >
+                  Ver Todas ({openFinanceTransactions.length})
+                </Button>
+              )}
+            </Card.Content>
+          </Card>
+        )}
       </ScrollView>
 
     <FAB
@@ -301,6 +374,10 @@ const styles = StyleSheet.create({
   welcomeText: {
     fontWeight: 'bold',
   },
+  welcomeSubtext: {
+    color: '#666',
+    marginTop: 4,
+  },
   notificationButton: {
     margin: 0,
   },
@@ -326,7 +403,28 @@ const styles = StyleSheet.create({
   },
   transactionsTitle: {
     marginBottom: 16,
+  },
+  transactionItem: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 12,
+  },
+  transactionInfo: {
+    flex: 1,
+  },
+  transactionDescription: {
+    fontWeight: '500',
+    color: '#333',
+    marginBottom: 4,
+  },
+  transactionDate: {
+    color: '#666',
+    fontSize: 12,
+  },
+  transactionAmount: {
     fontWeight: 'bold',
+    marginLeft: 12,
   },
   fab: {
     position: 'absolute',

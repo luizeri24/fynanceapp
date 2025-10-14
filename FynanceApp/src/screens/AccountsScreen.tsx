@@ -1,23 +1,45 @@
-import React, { useState } from 'react';
-import { ScrollView, StyleSheet, View } from 'react-native';
-import { 
-  Text, 
-  Card, 
-  FAB, 
-  useTheme, 
-  Button,
-  Divider,
-  Menu,
-  IconButton
-} from 'react-native-paper';
-import { Account } from '../types';
-import { mockAccounts } from '../data/mockData';
+import React, { useState, useCallback } from 'react';
+import { ScrollView, StyleSheet, View, RefreshControl } from 'react-native';
+import { Card, Text, useTheme, Chip, IconButton, Divider, FAB } from 'react-native-paper';
+import { useFocusEffect, useNavigation } from '@react-navigation/native';
+import { StackNavigationProp } from '@react-navigation/stack';
+import pluggyService, { PluggyAccount } from '../services/pluggyService';
+import { RootStackParamList } from '../types';
+
+type AccountsScreenNavigationProp = StackNavigationProp<RootStackParamList>;
 
 const AccountsScreen = () => {
   const theme = useTheme();
-  const [accounts, setAccounts] = useState<Account[]>(mockAccounts);
-  const [menuVisible, setMenuVisible] = useState<{ [key: string]: boolean }>({});
+  const navigation = useNavigation<AccountsScreenNavigationProp>();
+  const [accounts, setAccounts] = useState<PluggyAccount[]>([]);
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
+  // Carregar contas
+  const loadAccounts = async () => {
+    try {
+      const cachedAccounts = await pluggyService.getCachedAccounts();
+      console.log('🏦 Contas carregadas:', cachedAccounts.length);
+      setAccounts(cachedAccounts);
+    } catch (error) {
+      console.error('❌ Erro ao carregar contas:', error);
+    }
+  };
+
+  // Recarregar quando a tela ganhar foco
+  useFocusEffect(
+    useCallback(() => {
+      loadAccounts();
+    }, [])
+  );
+
+  // Refresh
+  const handleRefresh = async () => {
+    setIsRefreshing(true);
+    await loadAccounts();
+    setIsRefreshing(false);
+  };
+
+  // Formatar moeda
   const formatCurrency = (value: number) => {
     return new Intl.NumberFormat('pt-BR', {
       style: 'currency',
@@ -25,226 +47,267 @@ const AccountsScreen = () => {
     }).format(value);
   };
 
-  const getAccountTypeLabel = (type: string) => {
-    const types = {
-      'checking': 'Conta Corrente',
-      'savings': 'Poupança',
-      'investment': 'Investimento'
-    };
-    return types[type as keyof typeof types] || type;
+  // Calcular saldo total
+  const totalBalance = accounts.reduce((sum, account) => sum + (account.balance || 0), 0);
+
+  // Separar contas por tipo
+  const bankAccounts = accounts.filter(acc => acc.type === 'BANK');
+  const creditCards = accounts.filter(acc => acc.type === 'CREDIT');
+
+  // Ícone por tipo de conta
+  const getAccountIcon = (type: string, subtype?: string) => {
+    if (type === 'CREDIT') return 'credit-card';
+    if (subtype === 'CHECKING_ACCOUNT') return 'bank';
+    if (subtype === 'SAVINGS_ACCOUNT') return 'piggy-bank';
+    return 'wallet';
   };
 
-  const getAccountIcon = (type: string) => {
-    const icons = {
-      'checking': 'bank',
-      'savings': 'piggy-bank',
-      'investment': 'trending-up'
-    };
-    return icons[type as keyof typeof icons] || 'bank';
+  // Cor por tipo de conta
+  const getAccountColor = (type: string) => {
+    if (type === 'CREDIT') return '#9c27b0';
+    return theme.colors.primary;
   };
 
-  const getTotalBalance = () => {
-    return accounts.reduce((sum, account) => sum + account.balance, 0);
-  };
-
-  const toggleMenu = (accountId: string) => {
-    setMenuVisible(prev => ({
-      ...prev,
-      [accountId]: !prev[accountId]
-    }));
-  };
-
-  const handleAddAccount = () => {
-    console.log('Adicionar nova conta');
-    // TODO: Navigate to AddAccountScreen
-  };
-
-  const handleEditAccount = (accountId: string) => {
-    console.log('Editar conta:', accountId);
-    setMenuVisible(prev => ({ ...prev, [accountId]: false }));
-    // TODO: Navigate to EditAccountScreen
-  };
-
-  const handleViewDetails = (accountId: string) => {
-    console.log('Ver detalhes da conta:', accountId);
-    setMenuVisible(prev => ({ ...prev, [accountId]: false }));
-    // TODO: Navigate to AccountDetailsScreen
-  };
-
-  const handleDeleteAccount = (accountId: string) => {
-    console.log('Excluir conta:', accountId);
-    setMenuVisible(prev => ({ ...prev, [accountId]: false }));
-    // TODO: Show confirmation dialog and delete account
+  // Nome do tipo de conta
+  const getAccountTypeName = (type: string, subtype?: string) => {
+    if (type === 'CREDIT') return 'Cartão de Crédito';
+    if (subtype === 'CHECKING_ACCOUNT') return 'Conta Corrente';
+    if (subtype === 'SAVINGS_ACCOUNT') return 'Conta Poupança';
+    return 'Conta';
   };
 
   return (
     <>
-      <ScrollView style={styles.container}>
+      <ScrollView 
+        style={styles.container}
+        refreshControl={
+          <RefreshControl
+            refreshing={isRefreshing}
+            onRefresh={handleRefresh}
+            colors={[theme.colors.primary]}
+          />
+        }
+      >
         <Text variant="headlineSmall" style={styles.title}>
-          Minhas Contas
+          🏦 Minhas Contas
         </Text>
 
-        {/* Summary Card */}
+        {/* Resumo Geral */}
         <Card style={styles.summaryCard}>
           <Card.Content>
             <Text variant="titleMedium" style={styles.summaryTitle}>
-              Patrimônio Total
+              Resumo Geral
             </Text>
-            <Text variant="displayMedium" style={[styles.totalBalance, { color: theme.colors.primary }]}>
-              {formatCurrency(getTotalBalance())}
-            </Text>
-            <Text variant="bodyMedium" style={[styles.accountCount, { color: theme.colors.outline }]}>
-              {accounts.length} {accounts.length === 1 ? 'conta cadastrada' : 'contas cadastradas'}
-            </Text>
+            
+            <View style={styles.summaryRow}>
+              <View style={styles.summaryItem}>
+                <Text variant="bodySmall" style={styles.summaryLabel}>
+                  Total de Contas
+                </Text>
+                <Text variant="displaySmall" style={styles.summaryValue}>
+                  {accounts.length}
+                </Text>
+              </View>
+              
+              <Divider style={styles.divider} />
+              
+              <View style={styles.summaryItem}>
+                <Text variant="bodySmall" style={styles.summaryLabel}>
+                  Saldo Total
+                </Text>
+                <Text variant="titleLarge" style={[styles.summaryValue, { color: theme.colors.primary }]}>
+                  {formatCurrency(totalBalance)}
+                </Text>
+              </View>
+            </View>
+
+            <View style={styles.summaryRow}>
+              <View style={styles.summaryItem}>
+                <Text variant="bodySmall" style={styles.summaryLabel}>
+                  Contas Bancárias
+                </Text>
+                <Text variant="titleMedium" style={styles.summaryValue}>
+                  {bankAccounts.length}
+                </Text>
+              </View>
+              
+              <Divider style={styles.divider} />
+              
+              <View style={styles.summaryItem}>
+                <Text variant="bodySmall" style={styles.summaryLabel}>
+                  Cartões
+                </Text>
+                <Text variant="titleMedium" style={styles.summaryValue}>
+                  {creditCards.length}
+                </Text>
+              </View>
+            </View>
           </Card.Content>
         </Card>
 
-        {/* Accounts List */}
-        <Text variant="titleLarge" style={styles.sectionTitle}>
-          📋 Suas Contas
-        </Text>
-
-        {accounts.map((account) => (
-          <Card key={account.id} style={styles.accountCard}>
-            <Card.Content>
-              <View style={styles.accountHeader}>
-                <View style={styles.accountInfo}>
-                  <View style={styles.accountTitleRow}>
-                    <Text variant="titleMedium" style={styles.accountName}>
-                      {account.name}
-                    </Text>
-                    <Menu
-                      visible={menuVisible[account.id] || false}
-                      onDismiss={() => toggleMenu(account.id)}
-                      anchor={
-                        <IconButton
-                          icon="dots-vertical"
-                          size={20}
-                          onPress={() => toggleMenu(account.id)}
-                        />
-                      }
+        {/* Contas Bancárias */}
+        {bankAccounts.length > 0 && (
+          <>
+            <Text variant="titleMedium" style={styles.sectionTitle}>
+              Contas Bancárias
+            </Text>
+            {bankAccounts.map((account) => (
+              <Card key={account.id} style={styles.accountCard}>
+                <Card.Content>
+                  <View style={styles.accountHeader}>
+                    <View style={styles.accountHeaderLeft}>
+                      <IconButton
+                        icon={getAccountIcon(account.type, account.subtype)}
+                        size={24}
+                        iconColor="#fff"
+                        style={[styles.accountIcon, { backgroundColor: getAccountColor(account.type) }]}
+                      />
+                      <View>
+                        <Text variant="titleMedium" style={styles.accountName}>
+                          {account.name}
+                        </Text>
+                        <Text variant="bodySmall" style={styles.accountNumber}>
+                          {account.number}
+                        </Text>
+                      </View>
+                    </View>
+                    
+                    <Chip
+                      style={styles.typeChip}
+                      textStyle={styles.typeChipText}
+                      compact
                     >
-                      <Menu.Item 
-                        onPress={() => handleViewDetails(account.id)} 
-                        title="Ver detalhes" 
-                        leadingIcon="eye"
-                      />
-                      <Menu.Item 
-                        onPress={() => handleEditAccount(account.id)} 
-                        title="Editar" 
-                        leadingIcon="pencil"
-                      />
-                      <Divider />
-                      <Menu.Item 
-                        onPress={() => handleDeleteAccount(account.id)} 
-                        title="Excluir" 
-                        leadingIcon="delete"
-                        titleStyle={{ color: theme.colors.error }}
-                      />
-                    </Menu>
+                      {getAccountTypeName(account.type, account.subtype)}
+                    </Chip>
                   </View>
-                  
-                  <Text variant="bodyMedium" style={[styles.accountBank, { color: theme.colors.outline }]}>
-                    {account.bankName} • {getAccountTypeLabel(account.type)}
-                  </Text>
-                  
-                  <Text variant="bodySmall" style={[styles.accountNumber, { color: theme.colors.outline }]}>
-                    Conta: {account.accountNumber}
-                  </Text>
-                </View>
-              </View>
 
-              <View style={styles.balanceContainer}>
-                <Text variant="bodyMedium" style={styles.balanceLabel}>
-                  Saldo Atual
-                </Text>
-                <Text 
-                  variant="headlineSmall" 
-                  style={[
-                    styles.balance,
-                    { color: account.balance >= 0 ? theme.colors.primary : theme.colors.error }
-                  ]}
-                >
-                  {formatCurrency(account.balance)}
-                </Text>
-              </View>
+                  <Divider style={styles.accountDivider} />
 
-              {/* Quick Actions */}
-              <View style={styles.quickActions}>
-                <Button
-                  mode="outlined"
-                  style={styles.actionButton}
-                  icon="plus"
-                  onPress={() => console.log('Adicionar transação para:', account.id)}
-                >
-                  Transação
-                </Button>
-                <Button
-                  mode="outlined"
-                  style={styles.actionButton}
-                  icon="swap-horizontal"
-                  onPress={() => console.log('Transferir de:', account.id)}
-                >
-                  Transferir
-                </Button>
-              </View>
-            </Card.Content>
-          </Card>
-        ))}
+                  <View style={styles.balanceContainer}>
+                    <Text variant="bodySmall" style={styles.balanceLabel}>
+                      Saldo Disponível
+                    </Text>
+                    <Text variant="headlineSmall" style={[styles.balanceValue, { color: theme.colors.primary }]}>
+                      {formatCurrency(account.balance || 0)}
+                    </Text>
+                  </View>
+
+                  {/* @ts-ignore - bankData pode existir */}
+                  {account.bankData && (
+                    <View style={styles.extraInfo}>
+                      {/* @ts-ignore */}
+                      {account.bankData.transferNumber && (
+                        <View style={styles.infoRow}>
+                          <Text variant="bodySmall" style={styles.infoLabel}>
+                            Dados para Transferência:
+                          </Text>
+                          <Text variant="bodySmall" style={styles.infoValue}>
+                            {/* @ts-ignore */}
+                            {account.bankData.transferNumber}
+                          </Text>
+                        </View>
+                      )}
+                    </View>
+                  )}
+                </Card.Content>
+              </Card>
+            ))}
+          </>
+        )}
+
+        {/* Cartões de Crédito */}
+        {creditCards.length > 0 && (
+          <>
+            <Text variant="titleMedium" style={styles.sectionTitle}>
+              Cartões de Crédito
+            </Text>
+            {creditCards.map((account) => (
+              <Card key={account.id} style={styles.accountCard}>
+                <Card.Content>
+                  <View style={styles.accountHeader}>
+                    <View style={styles.accountHeaderLeft}>
+                      <IconButton
+                        icon={getAccountIcon(account.type, account.subtype)}
+                        size={24}
+                        iconColor="#fff"
+                        style={[styles.accountIcon, { backgroundColor: getAccountColor(account.type) }]}
+                      />
+                      <View>
+                        <Text variant="titleMedium" style={styles.accountName}>
+                          {account.name}
+                        </Text>
+                        <Text variant="bodySmall" style={styles.accountNumber}>
+                          •••• {account.number}
+                        </Text>
+                      </View>
+                    </View>
+                    
+                    <Chip
+                      style={[styles.typeChip, { backgroundColor: '#f3e5f5' }]}
+                      textStyle={[styles.typeChipText, { color: '#9c27b0' }]}
+                      compact
+                    >
+                      Cartão
+                    </Chip>
+                  </View>
+
+                  <Divider style={styles.accountDivider} />
+
+                  <View style={styles.balanceContainer}>
+                    <Text variant="bodySmall" style={styles.balanceLabel}>
+                      Fatura Atual
+                    </Text>
+                    <Text variant="headlineSmall" style={[styles.balanceValue, { color: '#f44336' }]}>
+                      {formatCurrency(account.balance || 0)}
+                    </Text>
+                  </View>
+
+                  {/* @ts-ignore - creditData pode existir */}
+                  {account.creditData && (
+                    <View style={styles.extraInfo}>
+                      <View style={styles.infoRow}>
+                        <Text variant="bodySmall" style={styles.infoLabel}>
+                          Limite Disponível:
+                        </Text>
+                        <Text variant="bodyMedium" style={[styles.infoValue, { color: '#4caf50' }]}>
+                          {/* @ts-ignore */}
+                          {formatCurrency(account.creditData.availableCreditLimit || 0)}
+                        </Text>
+                      </View>
+                    </View>
+                  )}
+                </Card.Content>
+              </Card>
+            ))}
+          </>
+        )}
 
         {/* Empty State */}
         {accounts.length === 0 && (
           <Card style={styles.emptyCard}>
             <Card.Content style={styles.emptyContent}>
-              <Text variant="headlineSmall" style={styles.emptyIcon}>
-                🏦
-              </Text>
+              <IconButton
+                icon="bank-off"
+                size={48}
+                iconColor="#999"
+              />
               <Text variant="titleMedium" style={styles.emptyTitle}>
-                Nenhuma conta cadastrada
+                Nenhuma conta encontrada
               </Text>
-              <Text variant="bodyMedium" style={[styles.emptyText, { color: theme.colors.outline }]}>
-                Adicione suas contas bancárias para começar a controlar suas finanças
+              <Text variant="bodyMedium" style={styles.emptyText}>
+                Conecte uma conta bancária para ver suas contas
               </Text>
-              <Button
-                mode="contained"
-                style={styles.emptyButton}
-                onPress={handleAddAccount}
-                icon="plus"
-              >
-                Adicionar primeira conta
-              </Button>
             </Card.Content>
           </Card>
         )}
-
-        {/* Tips */}
-        <Card style={styles.tipsCard}>
-          <Card.Content>
-            <Text variant="titleMedium" style={styles.tipsTitle}>
-              💡 Dicas para Organizar suas Contas
-            </Text>
-            
-            <Text variant="bodyMedium" style={styles.tipText}>
-              • Mantenha contas separadas para diferentes objetivos
-            </Text>
-            <Text variant="bodyMedium" style={styles.tipText}>
-              • Use a poupança para reserva de emergência
-            </Text>
-            <Text variant="bodyMedium" style={styles.tipText}>
-              • Considere contas de investimento para metas de longo prazo
-            </Text>
-            <Text variant="bodyMedium" style={styles.tipText}>
-              • Monitore os saldos regularmente para evitar surpresas
-            </Text>
-          </Card.Content>
-        </Card>
       </ScrollView>
 
+      {/* FAB para conectar nova conta */}
       <FAB
         icon="plus"
+        label="Conectar Conta"
         style={[styles.fab, { backgroundColor: theme.colors.primary }]}
-        onPress={handleAddAccount}
-        label="Nova Conta"
+        onPress={() => navigation.navigate('ConnectBank')}
       />
     </>
   );
@@ -254,119 +317,122 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#f5f5f5',
+    padding: 16,
   },
   title: {
-    margin: 16,
-    marginBottom: 8,
+    marginBottom: 16,
     fontWeight: 'bold',
   },
   summaryCard: {
-    margin: 16,
-    marginTop: 8,
+    marginBottom: 16,
   },
   summaryTitle: {
-    textAlign: 'center',
-    marginBottom: 8,
+    marginBottom: 16,
     fontWeight: 'bold',
   },
-  totalBalance: {
-    textAlign: 'center',
-    fontWeight: 'bold',
-    marginBottom: 8,
+  summaryRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    marginBottom: 12,
   },
-  accountCount: {
-    textAlign: 'center',
-    fontSize: 14,
+  summaryItem: {
+    flex: 1,
+    alignItems: 'center',
+  },
+  summaryLabel: {
+    color: '#666',
+    marginBottom: 4,
+  },
+  summaryValue: {
+    fontWeight: 'bold',
+  },
+  divider: {
+    width: 1,
+    height: 40,
   },
   sectionTitle: {
-    marginHorizontal: 16,
-    marginTop: 24,
-    marginBottom: 8,
+    marginTop: 8,
+    marginBottom: 12,
     fontWeight: 'bold',
   },
   accountCard: {
-    margin: 16,
-    marginTop: 8,
+    marginBottom: 12,
   },
   accountHeader: {
-    marginBottom: 16,
-  },
-  accountInfo: {
-    flex: 1,
-  },
-  accountTitleRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 4,
+    marginBottom: 12,
+  },
+  accountHeaderLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+  },
+  accountIcon: {
+    margin: 0,
+    marginRight: 12,
   },
   accountName: {
     fontWeight: 'bold',
-    flex: 1,
-  },
-  accountBank: {
-    marginBottom: 4,
   },
   accountNumber: {
-    fontSize: 12,
+    color: '#666',
+  },
+  typeChip: {
+    height: 24,
+    backgroundColor: '#e3f2fd',
+  },
+  typeChipText: {
+    fontSize: 10,
+    color: '#1976d2',
+  },
+  accountDivider: {
+    marginBottom: 12,
   },
   balanceContainer: {
     alignItems: 'center',
-    marginBottom: 16,
-    padding: 16,
-    backgroundColor: 'rgba(0,0,0,0.02)',
-    borderRadius: 8,
+    paddingVertical: 12,
   },
   balanceLabel: {
-    marginBottom: 8,
-    fontWeight: '500',
+    color: '#666',
+    marginBottom: 4,
   },
-  balance: {
+  balanceValue: {
     fontWeight: 'bold',
   },
-  quickActions: {
-    flexDirection: 'row',
-    gap: 8,
+  extraInfo: {
+    marginTop: 8,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: '#f0f0f0',
   },
-  actionButton: {
-    flex: 1,
+  infoRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 4,
+  },
+  infoLabel: {
+    color: '#666',
+  },
+  infoValue: {
+    fontWeight: '500',
   },
   emptyCard: {
-    margin: 16,
+    marginTop: 32,
   },
   emptyContent: {
     alignItems: 'center',
-    paddingVertical: 24,
-  },
-  emptyIcon: {
-    fontSize: 48,
-    marginBottom: 16,
+    padding: 32,
   },
   emptyTitle: {
+    marginTop: 16,
     marginBottom: 8,
-    fontWeight: 'bold',
+    color: '#666',
   },
   emptyText: {
+    color: '#999',
     textAlign: 'center',
-    marginBottom: 24,
-    lineHeight: 20,
-  },
-  emptyButton: {
-    paddingHorizontal: 24,
-  },
-  tipsCard: {
-    margin: 16,
-    marginTop: 24,
-    marginBottom: 80,
-  },
-  tipsTitle: {
-    marginBottom: 16,
-    fontWeight: 'bold',
-    textAlign: 'center',
-  },
-  tipText: {
-    marginBottom: 8,
-    lineHeight: 20,
   },
   fab: {
     position: 'absolute',
@@ -377,9 +443,3 @@ const styles = StyleSheet.create({
 });
 
 export default AccountsScreen;
-
-
-
-
-
-
