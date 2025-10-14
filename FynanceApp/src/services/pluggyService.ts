@@ -1,8 +1,8 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-// Configuração do Pluggy - SANDBOX para testes
-const PLUGGY_CLIENT_ID = 'f9d1b56a-d30a-4df6-a19c-1e9f3c4ad6b8';
-const PLUGGY_CLIENT_SECRET = 'f80af346-ff7c-47e3-bf69-9f9b2e1ef5b1';
+// Configuração do Pluggy - Suas credenciais
+const PLUGGY_CLIENT_ID = 'de084caf-5ac4-47e1-97c7-707dbd0d8444';
+const PLUGGY_CLIENT_SECRET = 'f196c29b-c17a-4682-b966-a220eccfab5b';
 const PLUGGY_API_URL = 'https://api.pluggy.ai';
 
 interface PluggyItem {
