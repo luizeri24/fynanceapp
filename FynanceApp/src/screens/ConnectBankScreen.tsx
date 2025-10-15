@@ -147,7 +147,7 @@ const ConnectBankScreen = () => {
       try {
         // Aguardar mais tempo para o Sandbox processar a conexão
         console.log('⏳ Aguardando processamento do Sandbox...');
-        await new Promise(resolve => setTimeout(resolve, 5000));
+        await new Promise<void>(resolve => setTimeout(resolve, 5000));
         
         // Tentar buscar dados reais usando o connectToken (múltiplas tentativas)
         if (connectToken) {
@@ -168,7 +168,7 @@ const ConnectBankScreen = () => {
           } else {
             // Segunda tentativa após mais tempo
             console.log('⏳ Aguardando mais tempo e tentando novamente...');
-            await new Promise(resolve => setTimeout(resolve, 3000));
+            await new Promise<void>(resolve => setTimeout(resolve, 3000));
             
             response = await fetch('https://api.pluggy.ai/items', {
               method: 'GET',
