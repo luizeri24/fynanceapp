@@ -1,179 +1,175 @@
-import React, { useState, useEffect } from 'react';
-import { ScrollView, StyleSheet, View, Dimensions } from 'react-native';
-import {
-  Text,
-  Card,
-  Button,
-  useTheme,
-  Chip,
-  ProgressBar,
-  List,
-  IconButton,
-  Divider
-} from 'react-native-paper';
-import { useAuth } from '../contexts/AuthContext';
-import { mockTransactions, mockAccounts, mockGoals } from '../data/mockData';
-
-interface AnalysisInsight {
-  id: string;
-  type: 'tip' | 'warning' | 'opportunity' | 'achievement' | 'prediction';
-  title: string;
-  description: string;
-  impact: 'low' | 'medium' | 'high';
-  category: string;
-  actionable: boolean;
-  potentialSaving?: number;
-  confidence: number;
-}
-
-interface SpendingPattern {
-  category: string;
-  amount: number;
-  percentage: number;
-  trend: 'up' | 'down' | 'stable';
-  comparison: number; // vs last month
-}
-
-interface FinancialScore {
-  overall: number;
-  spending: number;
-  saving: number;
-  planning: number;
-}
+import React, { useState, useCallback } from 'react';
+import { ScrollView, StyleSheet, View, RefreshControl } from 'react-native';
+import { Card, Text, useTheme, Chip, IconButton, Divider, List } from 'react-native-paper';
+import { useFocusEffect } from '@react-navigation/native';
+import pluggyService, { PluggyTransaction } from '../services/pluggyService';
 
 const SmartAnalysisScreen = () => {
   const theme = useTheme();
-  const { user } = useAuth();
-  
-  const [selectedPeriod, setSelectedPeriod] = useState('current_month');
-  const [loading, setLoading] = useState(false);
-  const [insights, setInsights] = useState<AnalysisInsight[]>([]);
-  const [spendingPatterns, setSpendingPatterns] = useState<SpendingPattern[]>([]);
-  const [financialScore, setFinancialScore] = useState<FinancialScore>({
-    overall: 75,
-    spending: 68,
-    saving: 82,
-    planning: 75
-  });
+  const [transactions, setTransactions] = useState<PluggyTransaction[]>([]);
+  const [accounts, setAccounts] = useState<any[]>([]);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [insights, setInsights] = useState<any[]>([]);
 
-  useEffect(() => {
-    generateAnalysis();
-  }, [selectedPeriod]);
+  // Carregar dados e gerar insights
+  const loadDataAndAnalyze = async () => {
+    try {
+      const cachedTransactions = await pluggyService.getCachedTransactions();
+      const cachedAccounts = await pluggyService.getCachedAccounts();
+      
+      setTransactions(cachedTransactions);
+      setAccounts(cachedAccounts);
 
-  const generateAnalysis = async () => {
-    setLoading(true);
-    
-    // Simulate AI analysis
-    await new Promise(resolve => setTimeout(resolve, 1500));
-    
-    // Generate insights based on mock data
-    const generatedInsights: AnalysisInsight[] = [
-      {
+      // Gerar insights
+      generateInsights(cachedTransactions, cachedAccounts);
+    } catch (error) {
+      console.error('❌ Erro ao carregar dados:', error);
+    }
+  };
+
+  // Gerar insights baseados nos dados
+  const generateInsights = (txs: PluggyTransaction[], accs: any[]) => {
+    const newInsights = [];
+
+    // 1. Análise de Gastos por Categoria
+    const categorySpending: Record<string, number> = {};
+    txs.filter(t => t.amount < 0).forEach(t => {
+      const category = t.category || 'Outros';
+      categorySpending[category] = (categorySpending[category] || 0) + Math.abs(t.amount);
+    });
+
+    const topCategory = Object.entries(categorySpending).sort((a, b) => b[1] - a[1])[0];
+    if (topCategory) {
+      newInsights.push({
         id: '1',
-        type: 'warning',
-        title: '🚨 Gasto Excessivo em Alimentação',
-        description: 'Você gastou 35% mais em alimentação este mês comparado ao anterior. Considere cozinhar mais em casa.',
-        impact: 'high',
-        category: 'Alimentação',
-        actionable: true,
-        potentialSaving: 320,
-        confidence: 92
-      },
-      {
-        id: '2',
-        type: 'opportunity',
-        title: '💡 Oportunidade de Investimento',
-        description: 'Com base no seu padrão de poupança, você pode investir R$ 500 mensais em renda fixa.',
-        impact: 'high',
-        category: 'Investimentos',
-        actionable: true,
-        potentialSaving: 600,
-        confidence: 88
-      },
-      {
+        type: 'spending',
+        icon: 'chart-pie',
+        title: 'Maior Categoria de Gastos',
+        description: `Você gastou mais em ${topCategory[0]}: ${formatCurrency(topCategory[1])}`,
+        color: '#f44336',
+        priority: 'high'
+      });
+    }
+
+    // 2. Média de Gastos Diários
+    const debits = txs.filter(t => t.amount < 0);
+    const totalSpent = debits.reduce((sum, t) => sum + Math.abs(t.amount), 0);
+    const avgDaily = totalSpent / 30; // Aproximadamente 30 dias
+    newInsights.push({
+      id: '2',
+      type: 'average',
+      icon: 'calendar-today',
+      title: 'Média de Gastos Diários',
+      description: `Você gasta em média ${formatCurrency(avgDaily)} por dia`,
+      color: '#ff9800',
+      priority: 'medium'
+    });
+
+    // 3. Análise de Saldo
+    const totalBalance = accs.reduce((sum, acc) => sum + (acc.balance || 0), 0);
+    if (totalBalance > 0) {
+      const daysUntilZero = Math.floor(totalBalance / avgDaily);
+      newInsights.push({
         id: '3',
-        type: 'tip',
-        title: '🎯 Meta Alcançável',
-        description: 'Você está muito próximo de atingir sua meta "Reserva de Emergência". Apenas R$ 350 restantes!',
-        impact: 'medium',
-        category: 'Metas',
-        actionable: true,
-        confidence: 95
-      },
-      {
+        type: 'balance',
+        icon: 'wallet',
+        title: 'Projeção de Saldo',
+        description: `Com seus gastos atuais, seu saldo durará aproximadamente ${daysUntilZero} dias`,
+        color: totalBalance > avgDaily * 30 ? '#4caf50' : '#ff9800',
+        priority: totalBalance > avgDaily * 30 ? 'low' : 'high'
+      });
+    }
+
+    // 4. Transações Recorrentes
+    const descriptions: Record<string, number> = {};
+    txs.forEach(t => {
+      descriptions[t.description] = (descriptions[t.description] || 0) + 1;
+    });
+    const recurring = Object.entries(descriptions).filter(([_, count]) => count > 2);
+    if (recurring.length > 0) {
+      newInsights.push({
         id: '4',
-        type: 'achievement',
-        title: '🏆 Padrão Positivo Detectado',
-        description: 'Excelente! Você reduziu gastos em transporte em 25% nos últimos 3 meses.',
-        impact: 'medium',
-        category: 'Transporte',
-        actionable: false,
-        confidence: 97
-      },
-      {
+        type: 'recurring',
+        icon: 'repeat',
+        title: 'Gastos Recorrentes Detectados',
+        description: `Identificamos ${recurring.length} gastos que se repetem. Considere criar alertas ou metas para eles.`,
+        color: '#2196f3',
+        priority: 'medium'
+      });
+    }
+
+    // 5. Maior Transação
+    const largestDebit = debits.sort((a, b) => Math.abs(b.amount) - Math.abs(a.amount))[0];
+    if (largestDebit) {
+      newInsights.push({
         id: '5',
-        type: 'prediction',
-        title: '📈 Projeção Financeira',
-        description: 'Mantendo o padrão atual, você terá R$ 12.500 poupados até o final do ano.',
-        impact: 'low',
-        category: 'Planejamento',
-        actionable: false,
-        confidence: 78
-      }
-    ];
+        type: 'largest',
+        icon: 'alert-circle',
+        title: 'Maior Gasto do Período',
+        description: `${largestDebit.description}: ${formatCurrency(Math.abs(largestDebit.amount))}`,
+        color: '#f44336',
+        priority: 'high'
+      });
+    }
 
-    // Generate spending patterns
-    const patterns: SpendingPattern[] = [
-      { category: 'Alimentação', amount: 1240, percentage: 35, trend: 'up', comparison: 15 },
-      { category: 'Transporte', amount: 680, percentage: 19, trend: 'down', comparison: -8 },
-      { category: 'Entretenimento', amount: 450, percentage: 13, trend: 'stable', comparison: 2 },
-      { category: 'Casa', amount: 820, percentage: 23, trend: 'up', comparison: 5 },
-      { category: 'Saúde', amount: 320, percentage: 9, trend: 'stable', comparison: -1 }
-    ];
+    // 6. Análise de Créditos
+    const credits = txs.filter(t => t.amount > 0);
+    const totalIncome = credits.reduce((sum, t) => sum + t.amount, 0);
+    if (totalIncome > 0) {
+      const savingsRate = ((totalIncome - totalSpent) / totalIncome) * 100;
+      newInsights.push({
+        id: '6',
+        type: 'savings',
+        icon: 'piggy-bank',
+        title: 'Taxa de Economia',
+        description: `Você está economizando ${savingsRate.toFixed(1)}% da sua renda`,
+        color: savingsRate > 20 ? '#4caf50' : savingsRate > 10 ? '#ff9800' : '#f44336',
+        priority: savingsRate > 20 ? 'low' : 'high'
+      });
+    }
 
-    setInsights(generatedInsights);
-    setSpendingPatterns(patterns);
-    setLoading(false);
+    // 7. Dica de Economia
+    if (avgDaily > 100) {
+      const potentialSavings = avgDaily * 0.1; // 10% de economia
+      newInsights.push({
+        id: '7',
+        type: 'tip',
+        icon: 'lightbulb-on',
+        title: '💡 Dica de Economia',
+        description: `Se você reduzir seus gastos em apenas 10%, poderá economizar ${formatCurrency(potentialSavings * 30)} por mês!`,
+        color: '#9c27b0',
+        priority: 'medium'
+      });
+    }
+
+    // 8. Análise de Cartão de Crédito
+    const creditCards = accs.filter(acc => acc.type === 'CREDIT');
+    if (creditCards.length > 0) {
+      const totalCreditUsed = creditCards.reduce((sum, card) => sum + (card.balance || 0), 0);
+      newInsights.push({
+        id: '8',
+        type: 'credit',
+        icon: 'credit-card',
+        title: 'Uso de Cartão de Crédito',
+        description: `Você tem ${formatCurrency(totalCreditUsed)} em faturas de cartão de crédito`,
+        color: totalCreditUsed > 1000 ? '#f44336' : '#4caf50',
+        priority: totalCreditUsed > 1000 ? 'high' : 'low'
+      });
+    }
+
+    setInsights(newInsights);
   };
 
-  const getInsightIcon = (type: string) => {
-    const iconMap = {
-      tip: '💡',
-      warning: '🚨',
-      opportunity: '🎯',
-      achievement: '🏆',
-      prediction: '📈'
-    };
-    return iconMap[type as keyof typeof iconMap] || '📊';
-  };
+  useFocusEffect(
+    useCallback(() => {
+      loadDataAndAnalyze();
+    }, [])
+  );
 
-  const getInsightColor = (type: string) => {
-    const colorMap = {
-      tip: '#2196f3',
-      warning: '#ff9800',
-      opportunity: '#4caf50',
-      achievement: '#9c27b0',
-      prediction: '#00bcd4'
-    };
-    return colorMap[type as keyof typeof colorMap] || theme.colors.primary;
-  };
-
-  const getImpactColor = (impact: string) => {
-    const colorMap = {
-      low: '#4caf50',
-      medium: '#ff9800',
-      high: '#f44336'
-    };
-    return colorMap[impact as keyof typeof colorMap] || theme.colors.outline;
-  };
-
-  const getTrendIcon = (trend: string) => {
-    const iconMap = {
-      up: '📈',
-      down: '📉',
-      stable: '➡️'
-    };
-    return iconMap[trend as keyof typeof iconMap] || '➡️';
+  const handleRefresh = async () => {
+    setIsRefreshing(true);
+    await loadDataAndAnalyze();
+    setIsRefreshing(false);
   };
 
   const formatCurrency = (value: number) => {
@@ -183,262 +179,154 @@ const SmartAnalysisScreen = () => {
     }).format(value);
   };
 
-  const periods = [
-    { key: 'current_month', label: 'Este Mês' },
-    { key: 'last_month', label: 'Mês Passado' },
-    { key: 'last_3_months', label: 'Últimos 3 Meses' },
-    { key: 'current_year', label: 'Este Ano' }
-  ];
+  // Ordenar insights por prioridade
+  const sortedInsights = insights.sort((a, b) => {
+    const priority = { high: 0, medium: 1, low: 2 };
+    return priority[a.priority as keyof typeof priority] - priority[b.priority as keyof typeof priority];
+  });
 
   return (
-    <ScrollView style={styles.container}>
-      {/* Header */}
-      <View style={styles.header}>
-        <Text variant="headlineSmall" style={styles.title}>
-          🤖 Análise Inteligente
-        </Text>
-        <Text variant="bodyMedium" style={[styles.subtitle, { color: theme.colors.outline }]}>
-          Insights personalizados sobre suas finanças
-        </Text>
-      </View>
+    <ScrollView 
+      style={styles.container}
+      refreshControl={
+        <RefreshControl
+          refreshing={isRefreshing}
+          onRefresh={handleRefresh}
+          colors={[theme.colors.primary]}
+        />
+      }
+    >
+      <Text variant="headlineSmall" style={styles.title}>
+        🤖 Análise Inteligente
+      </Text>
 
-      {/* Period Selector */}
-      <View style={styles.periodContainer}>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-          <View style={styles.periodChips}>
-            {periods.map(period => (
-              <Chip
-                key={period.key}
-                mode={selectedPeriod === period.key ? 'flat' : 'outlined'}
-                selected={selectedPeriod === period.key}
-                onPress={() => setSelectedPeriod(period.key)}
-                style={styles.periodChip}
-              >
-                {period.label}
-              </Chip>
-            ))}
-          </View>
-        </ScrollView>
-      </View>
-
-      {/* Financial Score */}
-      <Card style={styles.scoreCard}>
+      {/* Resumo Rápido */}
+      <Card style={styles.summaryCard}>
         <Card.Content>
-          <Text variant="titleLarge" style={styles.sectionTitle}>
-            📊 Score Financeiro
+          <Text variant="titleMedium" style={styles.summaryTitle}>
+            📊 Resumo Rápido
           </Text>
-          
-          <View style={styles.overallScore}>
-            <Text variant="displaySmall" style={[styles.scoreNumber, { color: theme.colors.primary }]}>
-              {financialScore.overall}
-            </Text>
-            <Text variant="bodyLarge" style={styles.scoreLabel}>
-              /100
-            </Text>
-          </View>
-          
-          <Text variant="bodyMedium" style={[styles.scoreDescription, { color: theme.colors.outline }]}>
-            Sua saúde financeira está boa! Continue focando em economia.
-          </Text>
-
-          <View style={styles.scoreBreakdown}>
-            <View style={styles.scoreItem}>
-              <Text variant="bodyMedium">💰 Gastos</Text>
-              <ProgressBar 
-                progress={financialScore.spending / 100} 
-                color={getImpactColor(financialScore.spending > 70 ? 'low' : 'medium')}
-                style={styles.scoreBar}
-              />
-              <Text variant="bodySmall">{financialScore.spending}/100</Text>
+          <View style={styles.summaryRow}>
+            <View style={styles.summaryItem}>
+              <IconButton icon="chart-line" size={24} iconColor={theme.colors.primary} />
+              <Text variant="bodySmall" style={styles.summaryLabel}>
+                Transações
+              </Text>
+              <Text variant="titleMedium" style={styles.summaryValue}>
+                {transactions.length}
+              </Text>
             </View>
-
-            <View style={styles.scoreItem}>
-              <Text variant="bodyMedium">🎯 Poupança</Text>
-              <ProgressBar 
-                progress={financialScore.saving / 100} 
-                color={getImpactColor('low')}
-                style={styles.scoreBar}
-              />
-              <Text variant="bodySmall">{financialScore.saving}/100</Text>
+            <Divider style={styles.divider} />
+            <View style={styles.summaryItem}>
+              <IconButton icon="bank" size={24} iconColor={theme.colors.primary} />
+              <Text variant="bodySmall" style={styles.summaryLabel}>
+                Contas
+              </Text>
+              <Text variant="titleMedium" style={styles.summaryValue}>
+                {accounts.length}
+              </Text>
             </View>
-
-            <View style={styles.scoreItem}>
-              <Text variant="bodyMedium">📅 Planejamento</Text>
-              <ProgressBar 
-                progress={financialScore.planning / 100} 
-                color={getImpactColor('medium')}
-                style={styles.scoreBar}
-              />
-              <Text variant="bodySmall">{financialScore.planning}/100</Text>
+            <Divider style={styles.divider} />
+            <View style={styles.summaryItem}>
+              <IconButton icon="lightbulb-on" size={24} iconColor={theme.colors.primary} />
+              <Text variant="bodySmall" style={styles.summaryLabel}>
+                Insights
+              </Text>
+              <Text variant="titleMedium" style={styles.summaryValue}>
+                {insights.length}
+              </Text>
             </View>
           </View>
         </Card.Content>
       </Card>
 
-      {/* Key Insights */}
-      <Card style={styles.insightsCard}>
-        <Card.Content>
-          <View style={styles.sectionHeader}>
-            <Text variant="titleLarge" style={styles.sectionTitle}>
-              🔍 Insights Principais
-            </Text>
-            <Button
-              mode="outlined"
-              onPress={generateAnalysis}
-              loading={loading}
-              disabled={loading}
-              icon="refresh"
-            >
-              Atualizar
-            </Button>
-          </View>
+      {/* Insights */}
+      <Text variant="titleMedium" style={styles.sectionTitle}>
+        💡 Insights Personalizados
+      </Text>
 
-          {insights.slice(0, 3).map((insight) => (
-            <Card key={insight.id} style={styles.insightCard}>
-              <Card.Content>
-                <View style={styles.insightHeader}>
-                  <Text style={styles.insightIcon}>
-                    {getInsightIcon(insight.type)}
-                  </Text>
+      {sortedInsights.length > 0 ? (
+        sortedInsights.map((insight) => (
+          <Card key={insight.id} style={styles.insightCard}>
+            <Card.Content>
+              <View style={styles.insightHeader}>
+                <View style={styles.insightHeaderLeft}>
+                  <IconButton
+                    icon={insight.icon}
+                    size={24}
+                    iconColor="#fff"
+                    style={[styles.insightIcon, { backgroundColor: insight.color }]}
+                  />
                   <View style={styles.insightTitleContainer}>
                     <Text variant="titleMedium" style={styles.insightTitle}>
                       {insight.title}
                     </Text>
-                    <View style={styles.insightMeta}>
-                      <Chip
-                        mode="outlined"
-                        textStyle={{ fontSize: 10 }}
-                        style={[styles.impactChip, { borderColor: getImpactColor(insight.impact) }]}
-                      >
-                        {insight.impact.toUpperCase()}
-                      </Chip>
-                      <Text variant="bodySmall" style={[styles.confidence, { color: theme.colors.outline }]}>
-                        {insight.confidence}% confiança
-                      </Text>
-                    </View>
+                    <Chip
+                      style={[
+                        styles.priorityChip,
+                        {
+                          backgroundColor: 
+                            insight.priority === 'high' ? '#ffebee' :
+                            insight.priority === 'medium' ? '#fff3e0' :
+                            '#e8f5e9'
+                        }
+                      ]}
+                      textStyle={{
+                        color: 
+                          insight.priority === 'high' ? '#f44336' :
+                          insight.priority === 'medium' ? '#ff9800' :
+                          '#4caf50',
+                        fontSize: 10
+                      }}
+                      compact
+                    >
+                      {insight.priority === 'high' ? 'Alta' : insight.priority === 'medium' ? 'Média' : 'Baixa'}
+                    </Chip>
                   </View>
                 </View>
+              </View>
+              <Text variant="bodyMedium" style={styles.insightDescription}>
+                {insight.description}
+              </Text>
+            </Card.Content>
+          </Card>
+        ))
+      ) : (
+        <Card style={styles.emptyCard}>
+          <Card.Content style={styles.emptyContent}>
+            <IconButton icon="robot-outline" size={48} iconColor="#999" />
+            <Text variant="titleMedium" style={styles.emptyTitle}>
+              Analisando seus dados...
+            </Text>
+            <Text variant="bodyMedium" style={styles.emptyText}>
+              Conecte uma conta bancária para receber insights personalizados
+            </Text>
+          </Card.Content>
+        </Card>
+      )}
 
-                <Text variant="bodyMedium" style={styles.insightDescription}>
-                  {insight.description}
-                </Text>
+      {/* Dicas Gerais */}
+      <Text variant="titleMedium" style={styles.sectionTitle}>
+        📚 Dicas Financeiras
+      </Text>
 
-                {insight.potentialSaving && (
-                  <View style={styles.savingPotential}>
-                    <Text variant="bodyMedium" style={[styles.savingText, { color: theme.colors.primary }]}>
-                      💰 Economia potencial: {formatCurrency(insight.potentialSaving)}
-                    </Text>
-                  </View>
-                )}
-
-                {insight.actionable && (
-                  <Button
-                    mode="contained"
-                    style={styles.actionButton}
-                    onPress={() => {
-                      // Handle insight action
-                    }}
-                  >
-                    Ver Detalhes
-                  </Button>
-                )}
-              </Card.Content>
-            </Card>
-          ))}
-        </Card.Content>
-      </Card>
-
-      {/* Spending Patterns */}
-      <Card style={styles.patternsCard}>
-        <Card.Content>
-          <Text variant="titleLarge" style={styles.sectionTitle}>
-            📈 Padrões de Gastos
-          </Text>
-
-          {spendingPatterns.map((pattern, index) => (
-            <View key={pattern.category}>
-              <List.Item
-                title={pattern.category}
-                description={`${pattern.percentage}% do total • ${formatCurrency(pattern.amount)}`}
-                left={() => (
-                  <View style={styles.patternIcon}>
-                    <Text style={styles.trendIcon}>
-                      {getTrendIcon(pattern.trend)}
-                    </Text>
-                  </View>
-                )}
-                right={() => (
-                  <View style={styles.patternRight}>
-                    <Text 
-                      variant="bodySmall" 
-                      style={[
-                        styles.comparison,
-                        { color: pattern.comparison > 0 ? '#f44336' : '#4caf50' }
-                      ]}
-                    >
-                      {pattern.comparison > 0 ? '+' : ''}{pattern.comparison}%
-                    </Text>
-                    <ProgressBar
-                      progress={pattern.percentage / 100}
-                      color={theme.colors.primary}
-                      style={styles.patternBar}
-                    />
-                  </View>
-                )}
-              />
-              {index < spendingPatterns.length - 1 && <Divider />}
-            </View>
-          ))}
-        </Card.Content>
-      </Card>
-
-      {/* Quick Actions */}
-      <Card style={styles.actionsCard}>
-        <Card.Content>
-          <Text variant="titleLarge" style={styles.sectionTitle}>
-            ⚡ Ações Rápidas
-          </Text>
-
-          <View style={styles.quickActions}>
-            <Button
-              mode="contained"
-              style={styles.quickAction}
-              onPress={() => {}}
-              icon="target"
-            >
-              Criar Meta
-            </Button>
-
-            <Button
-              mode="outlined"
-              style={styles.quickAction}
-              onPress={() => {}}
-              icon="chart-line"
-            >
-              Ver Relatório
-            </Button>
-
-            <Button
-              mode="outlined"
-              style={styles.quickAction}
-              onPress={() => {}}
-              icon="lightbulb"
-            >
-              Mais Dicas
-            </Button>
-          </View>
-        </Card.Content>
-      </Card>
-
-      {/* AI Disclaimer */}
-      <Card style={styles.disclaimerCard}>
-        <Card.Content>
-          <Text variant="bodySmall" style={[styles.disclaimer, { color: theme.colors.outline }]}>
-            🤖 As análises são geradas por inteligência artificial baseada nos seus dados financeiros. 
-            Os insights são sugestões e devem ser considerados junto com sua situação financeira pessoal.
-          </Text>
-        </Card.Content>
-      </Card>
+      <List.Section>
+        <List.Item
+          title="Regra 50-30-20"
+          description="50% necessidades, 30% desejos, 20% poupança"
+          left={props => <List.Icon {...props} icon="information" />}
+        />
+        <List.Item
+          title="Fundo de Emergência"
+          description="Mantenha 3-6 meses de despesas guardados"
+          left={props => <List.Icon {...props} icon="shield-check" />}
+        />
+        <List.Item
+          title="Evite Dívidas"
+          description="Pague suas faturas em dia para evitar juros"
+          left={props => <List.Icon {...props} icon="alert-circle" />}
+        />
+      </List.Section>
     </ScrollView>
   );
 };
@@ -447,96 +335,61 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#f5f5f5',
-  },
-  header: {
     padding: 16,
-    backgroundColor: '#fff',
-    borderBottomWidth: 1,
-    borderBottomColor: '#e0e0e0',
   },
   title: {
+    marginBottom: 16,
     fontWeight: 'bold',
+  },
+  summaryCard: {
+    marginBottom: 16,
+  },
+  summaryTitle: {
+    marginBottom: 16,
+    fontWeight: 'bold',
+  },
+  summaryRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+  },
+  summaryItem: {
+    flex: 1,
+    alignItems: 'center',
+  },
+  summaryLabel: {
+    color: '#666',
+    marginTop: -8,
     marginBottom: 4,
   },
-  subtitle: {
-    lineHeight: 20,
+  summaryValue: {
+    fontWeight: 'bold',
   },
-  periodContainer: {
-    backgroundColor: '#fff',
-    borderBottomWidth: 1,
-    borderBottomColor: '#e0e0e0',
-  },
-  periodChips: {
-    flexDirection: 'row',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    gap: 8,
-  },
-  periodChip: {
-    marginRight: 8,
-  },
-  scoreCard: {
-    margin: 16,
-    marginBottom: 8,
+  divider: {
+    width: 1,
+    height: 60,
   },
   sectionTitle: {
-    fontWeight: 'bold',
-    marginBottom: 16,
-  },
-  sectionHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 16,
-  },
-  overallScore: {
-    flexDirection: 'row',
-    alignItems: 'baseline',
-    justifyContent: 'center',
-    marginBottom: 8,
-  },
-  scoreNumber: {
-    fontSize: 48,
-    fontWeight: 'bold',
-  },
-  scoreLabel: {
-    marginLeft: 4,
-    opacity: 0.7,
-  },
-  scoreDescription: {
-    textAlign: 'center',
-    marginBottom: 24,
-  },
-  scoreBreakdown: {
-    gap: 16,
-  },
-  scoreItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-  },
-  scoreBar: {
-    flex: 1,
-    height: 8,
-  },
-  insightsCard: {
-    margin: 16,
     marginTop: 8,
-    marginBottom: 8,
+    marginBottom: 12,
+    fontWeight: 'bold',
   },
   insightCard: {
     marginBottom: 12,
-    backgroundColor: '#fafafa',
   },
   insightHeader: {
     flexDirection: 'row',
-    alignItems: 'flex-start',
-    marginBottom: 8,
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  insightHeaderLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
   },
   insightIcon: {
-    fontSize: 24,
+    margin: 0,
     marginRight: 12,
-    marginTop: 2,
   },
   insightTitleContainer: {
     flex: 1,
@@ -545,90 +398,30 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     marginBottom: 4,
   },
-  insightMeta: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  impactChip: {
+  priorityChip: {
+    alignSelf: 'flex-start',
     height: 24,
   },
-  confidence: {
-    fontSize: 12,
-  },
   insightDescription: {
+    color: '#666',
     lineHeight: 20,
-    marginBottom: 12,
   },
-  savingPotential: {
-    backgroundColor: '#e8f5e8',
-    padding: 8,
-    borderRadius: 8,
-    marginBottom: 12,
+  emptyCard: {
+    marginTop: 32,
   },
-  savingText: {
-    fontWeight: 'bold',
-  },
-  actionButton: {
-    alignSelf: 'flex-start',
-  },
-  patternsCard: {
-    margin: 16,
-    marginTop: 8,
-    marginBottom: 8,
-  },
-  patternIcon: {
-    justifyContent: 'center',
+  emptyContent: {
     alignItems: 'center',
-    width: 40,
+    padding: 32,
   },
-  trendIcon: {
-    fontSize: 20,
-  },
-  patternRight: {
-    alignItems: 'flex-end',
-    minWidth: 80,
-  },
-  comparison: {
-    fontSize: 12,
-    fontWeight: 'bold',
-    marginBottom: 4,
-  },
-  patternBar: {
-    width: 60,
-    height: 4,
-  },
-  actionsCard: {
-    margin: 16,
-    marginTop: 8,
+  emptyTitle: {
+    marginTop: 16,
     marginBottom: 8,
+    color: '#666',
   },
-  quickActions: {
-    flexDirection: 'row',
-    gap: 8,
-    flexWrap: 'wrap',
-  },
-  quickAction: {
-    flex: 1,
-    minWidth: 100,
-  },
-  disclaimerCard: {
-    margin: 16,
-    marginTop: 8,
-    marginBottom: 32,
-    backgroundColor: '#fff3e0',
-  },
-  disclaimer: {
+  emptyText: {
+    color: '#999',
     textAlign: 'center',
-    lineHeight: 18,
-    fontStyle: 'italic',
   },
 });
 
 export default SmartAnalysisScreen;
-
-
-
-
-
-

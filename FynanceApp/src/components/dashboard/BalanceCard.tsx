@@ -1,10 +1,9 @@
 import React from 'react';
 import { View, StyleSheet } from 'react-native';
 import { Card, Text, useTheme } from 'react-native-paper';
-import { Account } from '../../types';
 
 interface BalanceCardProps {
-  accounts: Account[];
+  accounts: Array<{ id: string; name: string; balance: number }>;
 }
 
 const BalanceCard: React.FC<BalanceCardProps> = ({ accounts }) => {

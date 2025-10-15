@@ -18,6 +18,14 @@ web-build/
 *.key
 *.mobileprovision
 
+# Build outputs
+android/app/build/
+android/.gradle/
+android/app/release/
+android/app/debug/
+*.apk
+*.aab
+
 # Metro
 .metro-health-check*
 
@@ -28,10 +36,18 @@ yarn-error.*
 
 # macOS
 .DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
 *.pem
 
 # local env files
 .env*.local
+.env.test
+.env.production
 
 # typescript
 *.tsbuildinfo
@@ -85,6 +101,15 @@ jspm_packages/
 # Optional npm cache directory
 .npm
 
+# Optional eslint cache
+.eslintcache
+
+# Microbundle cache
+.rpt2_cache/
+.rts2_cache_cjs/
+.rts2_cache_es/
+.rts2_cache_umd/
+
 # Optional REPL history
 .node_repl_history
 
@@ -101,6 +126,30 @@ jspm_packages/
 build/
 builds/
 
+# parcel-bundler cache (https://parceljs.org/)
+.cache
+.parcel-cache
+
+# next.js build output
+.next
+
+# nuxt.js build output
+.nuxt
+
+# vuepress build output
+.vuepress/dist
+
+# Serverless directories
+.serverless/
+
+# FuseBox cache
+.fusebox/
+
+# DynamoDB Local files
+.dynamodb/
+
+# TernJS port file
+.tern-port
+
 # Pluggy specific
 *.keystore
-*.jks

@@ -19,6 +19,9 @@ import CreateGoalScreen from '../screens/CreateGoalScreen';
 import AddFundsScreen from '../screens/AddFundsScreen';
 import BackupScreen from '../screens/BackupScreen';
 import ConnectBankScreen from '../screens/ConnectBankScreen';
+import TransactionsScreen from '../screens/TransactionsScreen';
+import InvestmentsScreen from '../screens/InvestmentsScreen';
+import LoansScreen from '../screens/LoansScreen';
 import { RootStackParamList } from '../types';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -177,6 +180,30 @@ const AppNavigator = () => {
             component={NotificationsScreen}
             options={{ 
               title: 'Notificações',
+              headerShown: true
+            }}
+          />
+          <Stack.Screen 
+            name="Transactions" 
+            component={TransactionsScreen}
+            options={{ 
+              title: 'Todas as Transações',
+              headerShown: true
+            }}
+          />
+          <Stack.Screen 
+            name="Investments" 
+            component={InvestmentsScreen}
+            options={{ 
+              title: 'Investimentos',
+              headerShown: true
+            }}
+          />
+          <Stack.Screen 
+            name="Loans" 
+            component={LoansScreen}
+            options={{ 
+              title: 'Empréstimos',
               headerShown: true
             }}
           />

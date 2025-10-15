@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { ScrollView, StyleSheet, View, RefreshControl } from 'react-native';
 import {
   Text,
@@ -15,7 +15,10 @@ import {
   ToggleButton,
   Divider
 } from 'react-native-paper';
+import { useFocusEffect } from '@react-navigation/native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useAuth } from '../contexts/AuthContext';
+import pluggyService, { PluggyTransaction } from '../services/pluggyService';
 
 interface Notification {
   id: string;
@@ -41,75 +44,169 @@ const NotificationsScreen = () => {
   const [refreshing, setRefreshing] = useState(false);
   const [showUnreadOnly, setShowUnreadOnly] = useState(false);
 
-  // Mock notifications data with better variety
-  const mockNotifications: Notification[] = [
-    {
-      id: '1',
-      title: '🎉 Meta Alcançada!',
-      message: 'Parabéns! Você atingiu sua meta de "Viagem dos Sonhos". R$ 5.000 conquistados!',
-      type: 'achievement',
-      category: 'goal',
-      isRead: false,
-      createdAt: new Date(Date.now() - 1000 * 60 * 30).toISOString(), // 30 minutes ago
-      priority: 'high'
-    },
-    {
-      id: '2',
-      title: '💳 Vencimento Próximo',
-      message: 'Seu cartão Nubank vence em 2 dias. Valor atual: R$ 1.247,85',
-      type: 'warning',
-      category: 'card',
-      isRead: false,
-      createdAt: new Date(Date.now() - 1000 * 60 * 60 * 2).toISOString(), // 2 hours ago
-      priority: 'high',
-      actionRequired: true
-    },
-    {
-      id: '3',
-      title: '📊 Relatório Mensal',
-      message: 'Seu relatório de dezembro está pronto! Economia de 15% comparado ao mês anterior.',
-      type: 'info',
-      category: 'system',
-      isRead: false,
-      createdAt: new Date(Date.now() - 1000 * 60 * 60 * 4).toISOString(), // 4 hours ago
-      priority: 'medium'
-    },
-    {
-      id: '4',
-      title: '⚠️ Limite de Gastos',
-      message: 'Você já gastou 85% do seu orçamento em "Alimentação" este mês.',
-      type: 'warning',
-      category: 'transaction',
-      isRead: true,
-      createdAt: new Date(Date.now() - 1000 * 60 * 60 * 6).toISOString(), // 6 hours ago
-      priority: 'medium',
-      actionRequired: true
-    },
-    {
-      id: '5',
-      title: '🏆 Nova Conquista!',
-      message: 'Desbloqueou "Poupador Iniciante" - 30 dias consecutivos adicionando à reserva!',
-      type: 'achievement',
-      category: 'achievement',
-      isRead: true,
-      createdAt: new Date(Date.now() - 1000 * 60 * 60 * 24 * 2).toISOString(), // 2 days ago
-      priority: 'low'
-    },
-    {
-      id: '6',
-      title: '💰 Transação Detectada',
-      message: 'Nova transação: -R$ 45,90 - Uber *TRIP em sua conta Itaú',
-      type: 'info',
-      category: 'transaction',
-      isRead: true,
-      createdAt: new Date(Date.now() - 1000 * 60 * 60 * 4).toISOString(), // 4 hours ago
-      priority: 'low'
-    }
-  ];
+  // Gerar notificações inteligentes baseadas nos dados do Open Finance
+  const generateSmartNotifications = async () => {
+    try {
+      const cachedAccounts = await pluggyService.getCachedAccounts();
+      const cachedTransactions = await pluggyService.getCachedTransactions();
+      const storedGoals = await AsyncStorage.getItem('@fynance:goals');
+      const goals = storedGoals ? JSON.parse(storedGoals) : [];
 
-  useEffect(() => {
-    setNotifications(mockNotifications);
-  }, []);
+      const smartNotifications: Notification[] = [];
+
+      // 1. Notificações de Cartões de Crédito
+      const creditCards = cachedAccounts.filter(acc => acc.type === 'CREDIT');
+      creditCards.forEach((card: any) => {
+        if (card.creditData?.balanceDueDate) {
+          const dueDate = new Date(card.creditData.balanceDueDate);
+          const daysUntilDue = Math.ceil((dueDate.getTime() - Date.now()) / (1000 * 60 * 60 * 24));
+          
+          if (daysUntilDue <= 3 && daysUntilDue >= 0) {
+            smartNotifications.push({
+              id: `card-due-${card.id}`,
+              title: '💳 Vencimento Próximo',
+              message: `Seu cartão ${card.name} vence em ${daysUntilDue} dia(s). Fatura: ${formatCurrency(card.balance)}`,
+              type: 'warning',
+              category: 'card',
+              isRead: false,
+              createdAt: new Date().toISOString(),
+              priority: 'high',
+              actionRequired: true
+            });
+          }
+        }
+      });
+
+      // 2. Notificações de Transações Grandes
+      const recentTransactions = cachedTransactions
+        .filter(t => new Date(t.date).getTime() > Date.now() - 7 * 24 * 60 * 60 * 1000) // Últimos 7 dias
+        .sort((a, b) => Math.abs(b.amount) - Math.abs(a.amount));
+      
+      if (recentTransactions.length > 0) {
+        const largestTransaction = recentTransactions[0];
+        if (Math.abs(largestTransaction.amount) > 1000) {
+          smartNotifications.push({
+            id: `transaction-large-${largestTransaction.id}`,
+            title: '💰 Transação Grande Detectada',
+            message: `${largestTransaction.description}: ${formatCurrency(Math.abs(largestTransaction.amount))}`,
+            type: 'info',
+            category: 'transaction',
+            isRead: false,
+            createdAt: largestTransaction.date,
+            priority: 'medium'
+          });
+        }
+      }
+
+      // 3. Notificações de Metas
+      goals.forEach((goal: any) => {
+        const progress = (goal.currentAmount / goal.targetAmount) * 100;
+        
+        if (progress >= 90 && progress < 100) {
+          smartNotifications.push({
+            id: `goal-almost-${goal.id}`,
+            title: '🎯 Meta Quase Alcançada!',
+            message: `Faltam apenas ${formatCurrency(goal.targetAmount - goal.currentAmount)} para atingir "${goal.name}"!`,
+            type: 'success',
+            category: 'goal',
+            isRead: false,
+            createdAt: new Date().toISOString(),
+            priority: 'high'
+          });
+        } else if (progress >= 100) {
+          smartNotifications.push({
+            id: `goal-complete-${goal.id}`,
+            title: '🎉 Meta Alcançada!',
+            message: `Parabéns! Você atingiu sua meta "${goal.name}": ${formatCurrency(goal.targetAmount)}!`,
+            type: 'achievement',
+            category: 'goal',
+            isRead: false,
+            createdAt: new Date().toISOString(),
+            priority: 'high'
+          });
+        }
+      });
+
+      // 4. Notificação de Saldo Baixo
+      const totalBalance = cachedAccounts.reduce((sum, acc) => sum + (acc.balance || 0), 0);
+      if (totalBalance < 500 && totalBalance > 0) {
+        smartNotifications.push({
+          id: 'balance-low',
+          title: '⚠️ Saldo Baixo',
+          message: `Seu saldo total está em ${formatCurrency(totalBalance)}. Considere reduzir gastos.`,
+          type: 'warning',
+          category: 'system',
+          isRead: false,
+          createdAt: new Date().toISOString(),
+          priority: 'high',
+          actionRequired: true
+        });
+      }
+
+      // 5. Análise de Gastos Recorrentes
+      const descriptions: Record<string, number> = {};
+      cachedTransactions.forEach(t => {
+        if (t.amount < 0) {
+          descriptions[t.description] = (descriptions[t.description] || 0) + 1;
+        }
+      });
+      const recurring = Object.entries(descriptions).filter(([_, count]) => count > 3);
+      if (recurring.length > 0) {
+        smartNotifications.push({
+          id: 'recurring-expenses',
+          title: '🔄 Gastos Recorrentes',
+          message: `Detectamos ${recurring.length} gastos que se repetem. Considere criar alertas.`,
+          type: 'info',
+          category: 'system',
+          isRead: false,
+          createdAt: new Date().toISOString(),
+          priority: 'medium'
+        });
+      }
+
+      // 6. Boas-vindas se for primeira vez
+      if (cachedAccounts.length > 0 && smartNotifications.length === 0) {
+        smartNotifications.push({
+          id: 'welcome',
+          title: '👋 Bem-vindo ao Fynance!',
+          message: `Suas ${cachedAccounts.length} contas foram conectadas com sucesso! Explore o app para ver insights e análises.`,
+          type: 'success',
+          category: 'system',
+          isRead: false,
+          createdAt: new Date().toISOString(),
+          priority: 'medium'
+        });
+      }
+
+      // Mesclar com notificações existentes do AsyncStorage
+      const storedNotifications = await AsyncStorage.getItem('@fynance:notifications');
+      const existing = storedNotifications ? JSON.parse(storedNotifications) : [];
+      
+      // Remover duplicatas
+      const allNotifications = [...smartNotifications, ...existing].filter((notif, index, self) =>
+        index === self.findIndex(t => t.id === notif.id)
+      );
+
+      // Salvar e atualizar
+      await AsyncStorage.setItem('@fynance:notifications', JSON.stringify(allNotifications));
+      setNotifications(allNotifications);
+    } catch (error) {
+      console.error('❌ Erro ao gerar notificações:', error);
+    }
+  };
+
+  const formatCurrency = (value: number) => {
+    return new Intl.NumberFormat('pt-BR', {
+      style: 'currency',
+      currency: 'BRL'
+    }).format(value);
+  };
+
+  useFocusEffect(
+    useCallback(() => {
+      generateSmartNotifications();
+    }, [])
+  );
 
   useEffect(() => {
     let filtered = notifications;
@@ -148,19 +245,22 @@ const NotificationsScreen = () => {
 
   const onRefresh = async () => {
     setRefreshing(true);
-    // Simulate refresh
-    await new Promise(resolve => setTimeout(resolve, 1000));
+    await generateSmartNotifications();
     setRefreshing(false);
   };
 
-  const markAsRead = (id: string) => {
-    setNotifications(prev => prev.map(n => 
+  const markAsRead = async (id: string) => {
+    const updated = notifications.map(n => 
       n.id === id ? { ...n, isRead: true } : n
-    ));
+    );
+    setNotifications(updated);
+    await AsyncStorage.setItem('@fynance:notifications', JSON.stringify(updated));
   };
 
-  const markAllAsRead = () => {
-    setNotifications(prev => prev.map(n => ({ ...n, isRead: true })));
+  const markAllAsRead = async () => {
+    const updated = notifications.map(n => ({ ...n, isRead: true }));
+    setNotifications(updated);
+    await AsyncStorage.setItem('@fynance:notifications', JSON.stringify(updated));
   };
 
   const handleNotificationAction = (notification: Notification) => {

@@ -162,6 +162,9 @@ export type RootStackParamList = {
   
   // Open Finance Screens
   ConnectBank: undefined;
+  Transactions: undefined;
+  Investments: undefined;
+  Loans: undefined;
   Backup: undefined;
   Notifications: undefined;
   Profile: undefined;
