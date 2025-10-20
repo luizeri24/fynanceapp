@@ -48,12 +48,14 @@ class PluggyService {
   async getAccessToken(): Promise<string> {
     // Verifica se o token ainda é válido
     if (this.accessToken && this.tokenExpiry && Date.now() < this.tokenExpiry) {
+      console.log('🔑 Usando token em cache (válido)');
       return this.accessToken;
     }
 
     try {
-      console.log('🔑 Pluggy: Obtendo access token...');
+      console.log('🔑 Pluggy: Obtendo novo access token...');
       console.log('🔑 Client ID:', PLUGGY_CLIENT_ID);
+      console.log('🔑 API URL:', PLUGGY_API_URL);
       
       const response = await fetch(`${PLUGGY_API_URL}/auth`, {
         method: 'POST',
@@ -71,6 +73,7 @@ class PluggyService {
       console.log('🔑 Response data:', data);
       
       if (!response.ok) {
+        console.error('🔑 Erro na autenticação:', data);
         throw new Error(data.message || `Erro ao autenticar com Pluggy: ${response.status}`);
       }
 
@@ -82,47 +85,11 @@ class PluggyService {
         throw new Error('API Key não recebida do Pluggy');
       }
 
+      console.log('🔑 Token obtido com sucesso:', this.accessToken.substring(0, 10) + '...');
       return this.accessToken;
     } catch (error) {
-      console.error('Erro ao obter token Pluggy:', error);
+      console.error('🔑 Erro ao obter token Pluggy:', error);
       throw error;
-    }
-  }
-
-  /**
-   * Busca conectores disponíveis (apenas Sandbox)
-   */
-  async getConnectors(): Promise<any[]> {
-    try {
-      console.log('🔍 Pluggy: Buscando conectores Sandbox...');
-      const token = await this.getAccessToken();
-      
-      // Buscar apenas conectores Sandbox usando filtro
-      const response = await fetch(`${PLUGGY_API_URL}/connectors?sandbox=true`, {
-        method: 'GET',
-        headers: {
-          'X-API-KEY': token,
-        },
-      });
-
-      console.log('🔍 Response status:', response.status);
-      const data = await response.json();
-      
-      if (!response.ok) {
-        throw new Error(data.message || `Erro ao buscar conectores: ${response.status}`);
-      }
-
-      const connectors = data.results || [];
-      console.log('🔍 Conectores Sandbox encontrados:', connectors.length);
-      
-      // Filtrar apenas o MeuPluggy (ID 200) para garantir
-      const sandboxConnectors = connectors.filter((c: any) => c.id === 200);
-      console.log('🧪 Conectores filtrados (apenas MeuPluggy):', sandboxConnectors.length);
-      
-      return sandboxConnectors;
-    } catch (error) {
-      console.error('Erro ao buscar conectores:', error);
-      return [];
     }
   }
 
@@ -133,26 +100,12 @@ class PluggyService {
     try {
       console.log('🔗 Pluggy: Criando connect token...');
       const token = await this.getAccessToken();
-      console.log('🔗 Access token obtido:', token ? '✅' : '❌');
       
-      const body: any = {
-        parameters: {
-          products: ['ACCOUNTS', 'TRANSACTIONS', 'CREDIT_CARDS', 'INVESTMENTS']
-        }
-      };
-      
-      // FORÇAR uso do Sandbox connector apenas para testes
-      console.log('🧪 MODO SANDBOX: Forçando uso do Sandbox connector (ID 200)');
-      body.parameters.connectorIds = [200]; // ID 200 = MeuPluggy (Sandbox)
-      
-      console.log('🔗 Conectores que serão usados:', body.parameters.connectorIds);
-      
+      const body: any = {};
       if (itemId) {
         body.itemId = itemId;
       }
 
-      console.log('🔗 Enviando requisição para connect_token...');
-      console.log('🔗 Body:', JSON.stringify(body, null, 2));
       const response = await fetch(`${PLUGGY_API_URL}/connect_token`, {
         method: 'POST',
         headers: {
@@ -162,9 +115,7 @@ class PluggyService {
         body: JSON.stringify(body),
       });
 
-      console.log('🔗 Response status:', response.status);
       const data = await response.json();
-      console.log('🔗 Response data:', data);
       
       if (!response.ok) {
         throw new Error(data.message || `Erro ao criar connect token: ${response.status}`);
@@ -178,48 +129,41 @@ class PluggyService {
   }
 
   /**
-   * Busca todos os items (conexões) usando Connect Token
+   * Busca todos os items (conexões) da API usando a API Key.
    */
-  async getItems(connectToken?: string): Promise<PluggyItem[]> {
+  async getItems(): Promise<PluggyItem[]> {
     try {
-      console.log('📦 Pluggy: Buscando items...');
-      
-      // Se não tiver connectToken, tentar buscar do cache
-      if (!connectToken) {
-        console.log('📦 Nenhum connect token fornecido, buscando do cache...');
-        const cachedItems = await this.getCachedItems();
-        if (cachedItems.length > 0) {
-          console.log('📦 Items encontrados no cache:', cachedItems.length);
-          return cachedItems;
-        }
-        console.log('📦 Nenhum item no cache, retornando array vazio');
-        return [];
-      }
+      console.log('📦 Pluggy: Buscando items da API...');
+      const token = await this.getAccessToken();
+      console.log('📦 Token para getItems:', token ? token.substring(0, 10) + '...' : 'null');
       
       const response = await fetch(`${PLUGGY_API_URL}/items`, {
         method: 'GET',
         headers: {
-          'Authorization': `Bearer ${connectToken}`,
+          'X-API-KEY': token,
+          'Content-Type': 'application/json',
         },
       });
 
       console.log('📦 Response status:', response.status);
       const data = await response.json();
-      console.log('📦 Response data:', JSON.stringify(data, null, 2));
+      console.log('📦 Response data:', data);
       
       if (!response.ok) {
+        console.error('📦 Erro na resposta:', data);
         throw new Error(data.message || `Erro ao buscar items: ${response.status}`);
       }
       
       const items = data.results || [];
-      console.log('📦 Items encontrados:', items.length);
+      console.log('📦 Items encontrados na API:', items.length);
       
       // Salvar no cache
       await AsyncStorage.setItem('@fynance:pluggy_items', JSON.stringify(items));
       return items;
     } catch (error: any) {
       console.error('❌ Erro em getItems:', error.message || error);
-      throw error;
+      console.log('📦 Erro ao buscar da API, retornando cache...');
+      return this.getCachedItems();
     }
   }
 
@@ -235,22 +179,17 @@ class PluggyService {
         method: 'GET',
         headers: {
           'X-API-KEY': token,
+          'Content-Type': 'application/json',
         },
       });
 
-      console.log(`💰 Response status (item ${itemId}):`, response.status);
       const data = await response.json();
-      console.log(`💰 Response data (item ${itemId}):`, JSON.stringify(data, null, 2));
       
       if (!response.ok) {
         throw new Error(data.message || `Erro ao buscar contas para item ${itemId}: ${response.status}`);
       }
       
       const accounts = data.results || [];
-      console.log(`💰 Contas encontradas para item ${itemId}:`, accounts.length);
-      
-      // Salvar no cache
-      await AsyncStorage.setItem('@fynance:pluggy_accounts', JSON.stringify(accounts));
       return accounts;
     } catch (error: any) {
       console.error(`❌ Erro ao buscar contas para item ${itemId}:`, error.message || error);
@@ -259,135 +198,35 @@ class PluggyService {
   }
 
   /**
-   * Busca transações de uma conta específica usando API Key
+   * Busca todas as contas de todos os items.
    */
-  async getTransactionsByAccountId(accountId: string): Promise<PluggyTransaction[]> {
+  async getAllAccounts(): Promise<PluggyAccount[]> {
     try {
-      console.log(`💸 Pluggy: Buscando transações para conta ${accountId}...`);
-      const token = await this.getAccessToken();
-      
-      const response = await fetch(`${PLUGGY_API_URL}/transactions?accountId=${accountId}`, {
-        method: 'GET',
-        headers: {
-          'X-API-KEY': token,
-        },
-      });
-
-      console.log(`💸 Response status (conta ${accountId}):`, response.status);
-      const data = await response.json();
-      console.log(`💸 Response data (conta ${accountId}):`, JSON.stringify(data, null, 2));
-      
-      if (!response.ok) {
-        throw new Error(data.message || `Erro ao buscar transações para conta ${accountId}: ${response.status}`);
-      }
-      
-      const transactions = data.results || [];
-      console.log(`💸 Transações encontradas para conta ${accountId}:`, transactions.length);
-      
-      return transactions;
-    } catch (error: any) {
-      console.error(`❌ Erro ao buscar transações para conta ${accountId}:`, error.message || error);
-      return []; // Retorna array vazio em caso de erro
-    }
-  }
-
-  /**
-   * Busca todas as transações de todas as contas
-   */
-  async getAllTransactions(accountIds: string[]): Promise<PluggyTransaction[]> {
-    try {
-      console.log(`💸 Pluggy: Buscando transações para ${accountIds.length} contas...`);
-      
-      let allTransactions: PluggyTransaction[] = [];
-      
-      for (const accountId of accountIds) {
-        const transactions = await this.getTransactionsByAccountId(accountId);
-        allTransactions = [...allTransactions, ...transactions];
-      }
-      
-      console.log(`💸 Total de transações encontradas:`, allTransactions.length);
-      
-      // Salvar no cache
-      await AsyncStorage.setItem('@fynance:pluggy_transactions', JSON.stringify(allTransactions));
-      return allTransactions;
-    } catch (error: any) {
-      console.error('❌ Erro ao buscar todas as transações:', error.message || error);
-      return [];
-    }
-  }
-
-  /**
-   * Busca transações do cache
-   */
-  async getCachedTransactions(): Promise<PluggyTransaction[]> {
-    try {
-      const cached = await AsyncStorage.getItem('@fynance:pluggy_transactions');
-      return cached ? JSON.parse(cached) : [];
-    } catch (error) {
-      console.error('❌ Erro ao buscar transações do cache:', error);
-      return [];
-    }
-  }
-
-  /**
-   * Busca todas as contas de todos os items usando Connect Token
-   */
-  async getAllAccounts(connectToken?: string): Promise<PluggyAccount[]> {
-    try {
-      console.log('💰 Pluggy: Buscando contas...');
-      
-      // Se não tiver connectToken, tentar buscar do cache
-      if (!connectToken) {
-        console.log('💰 Nenhum connect token fornecido, buscando do cache...');
-        const cachedAccounts = await this.getCachedAccounts();
-        if (cachedAccounts.length > 0) {
-          console.log('💰 Contas encontradas no cache:', cachedAccounts.length);
-          return cachedAccounts;
-        }
-        console.log('💰 Nenhuma conta no cache, retornando array vazio');
-        return [];
-      }
-      
-      const items = await this.getItems(connectToken);
+      console.log('💰 Pluggy: Buscando todas as contas da API...');
+      const items = await this.getItems(); // Chama a função corrigida que busca da API
       
       if (items.length === 0) {
         console.log('💰 Nenhum item encontrado para buscar contas');
+        await AsyncStorage.setItem('@fynance:pluggy_accounts', JSON.stringify([]));
         return [];
       }
 
       let allAccounts: PluggyAccount[] = [];
 
       for (const item of items) {
-        console.log(`💰 Buscando contas para item: ${item.id} (${item.connector.name})`);
-        
-        const response = await fetch(`${PLUGGY_API_URL}/accounts?itemId=${item.id}`, {
-          method: 'GET',
-          headers: {
-            'Authorization': `Bearer ${connectToken}`,
-          },
-        });
-
-        console.log(`💰 Response status (item ${item.id}):`, response.status);
-        const data = await response.json();
-        
-        if (!response.ok) {
-          console.error(`❌ Erro ao buscar contas para item ${item.id}:`, data);
-          continue; // Continua para o próximo item
-        }
-        
-        const accounts = data.results || [];
-        console.log(`💰 Contas encontradas para ${item.connector.name}:`, accounts.length);
+        const accounts = await this.getAccountsByItemId(item.id);
         allAccounts = [...allAccounts, ...accounts];
       }
       
-      console.log('💰 Total de contas encontradas:', allAccounts.length);
+      console.log('💰 Total de contas encontradas na API:', allAccounts.length);
       
       // Salvar no cache
       await AsyncStorage.setItem('@fynance:pluggy_accounts', JSON.stringify(allAccounts));
       return allAccounts;
     } catch (error: any) {
       console.error('❌ Erro em getAllAccounts:', error.message || error);
-      throw error;
+      console.log('💰 Erro ao buscar da API, retornando cache...');
+      return this.getCachedAccounts();
     }
   }
 
@@ -399,23 +238,19 @@ class PluggyService {
       console.log(`🗑️ Pluggy: Deletando item ${itemId}...`);
       const token = await this.getAccessToken();
       
-      const response = await fetch(`${PLUGGY_API_URL}/items/${itemId}`, {
+      await fetch(`${PLUGGY_API_URL}/items/${itemId}`, {
         method: 'DELETE',
         headers: {
           'X-API-KEY': token,
+          'Content-Type': 'application/json',
         },
       });
-
-      if (!response.ok) {
-        const data = await response.json();
-        throw new Error(data.message || 'Erro ao deletar item');
-      }
       
       console.log(`✅ Item ${itemId} deletado com sucesso`);
       
       // Limpa o cache após deletar
-      await AsyncStorage.removeItem('@fynance:pluggy_items');
-      await AsyncStorage.removeItem('@fynance:pluggy_accounts');
+      await this.getAllAccounts(); // Re-fetch all accounts from remaining items and update cache
+      await this.getCachedItems(); // Re-fetch items and update cache
     } catch (error: any) {
       console.error('❌ Erro em deleteItem:', error.message || error);
       throw error;
@@ -423,17 +258,21 @@ class PluggyService {
   }
 
   /**
-   * Atualiza um item (força a sincronização)
+   * Força a atualização de um item no Pluggy.
    */
   async updateItem(itemId: string): Promise<void> {
     try {
+      console.log(`🔄 Pluggy: Solicitando atualização para o item ${itemId}...`);
       const token = await this.getAccessToken();
       await fetch(`${PLUGGY_API_URL}/items/${itemId}`, {
         method: 'PATCH',
         headers: {
           'X-API-KEY': token,
+          'Content-Type': 'application/json',
         },
+        body: JSON.stringify({ parameters: {} }),
       });
+      console.log(`✅ Solicitação de atualização enviada para o item ${itemId}`);
     } catch (error) {
       console.error('Erro em updateItem:', error);
       throw error;
@@ -450,25 +289,133 @@ class PluggyService {
 
   /**
    * Carrega contas do cache
+   Garante que o itemID está presente em cada conta.
    */
   async getCachedAccounts(): Promise<PluggyAccount[]> {
     const cached = await AsyncStorage.getItem('@fynance:pluggy_accounts');
-    const accounts = cached ? JSON.parse(cached) : [];
-    
-    // Log detalhado dos dados
-    console.log('🔍 Cache de contas carregado:', accounts.length);
-    accounts.forEach((account: PluggyAccount, index: number) => {
-      console.log(`🔍 Conta ${index + 1}:`, {
-        id: account.id,
-        name: account.name,
-        type: account.type,
-        subtype: account.subtype,
-        balance: account.balance,
-        number: account.number
+    return cached ? JSON.parse(cached) : [];
+  }
+
+  /**
+   * Busca transações de contas específicas
+   */
+  async getTransactionsByAccountIds(accountIds: string[]): Promise<PluggyTransaction[]> {
+    try {
+      console.log('💳 Pluggy: Buscando transações para contas:', accountIds);
+      const token = await this.getAccessToken();
+      
+      let allTransactions: PluggyTransaction[] = [];
+
+      for (const accountId of accountIds) {
+        try {
+          console.log(`💳 Buscando transações para conta: ${accountId}`);
+          const response = await fetch(`${PLUGGY_API_URL}/transactions?accountId=${accountId}`, {
+            method: 'GET',
+            headers: {
+              'X-API-KEY': token,
+              'Content-Type': 'application/json',
+            },
+          });
+
+          console.log(`💳 Response status para conta ${accountId}:`, response.status);
+          const data = await response.json();
+          console.log(`💳 Response data para conta ${accountId}:`, data);
+          
+          if (response.ok && data.results) {
+            console.log(`💳 Transações encontradas para conta ${accountId}:`, data.results.length);
+            allTransactions = [...allTransactions, ...data.results];
+          } else {
+            console.warn(`💳 Nenhuma transação encontrada para conta ${accountId}. Status: ${response.status}`);
+          }
+        } catch (error) {
+          console.error(`❌ Erro ao buscar transações da conta ${accountId}:`, error);
+        }
+      }
+      
+      console.log('💳 Total de transações encontradas:', allTransactions.length);
+      
+      // Salvar no cache
+      await AsyncStorage.setItem('@fynance:pluggy_transactions', JSON.stringify(allTransactions));
+      return allTransactions;
+    } catch (error: any) {
+      console.error('❌ Erro em getTransactionsByAccountIds:', error.message || error);
+      console.log('💳 Erro ao buscar da API, retornando cache...');
+      return this.getCachedTransactions();
+    }
+  }
+
+  /**
+   * Busca todas as transações de todas as contas
+   */
+  async getAllTransactions(accountIds: string[]): Promise<PluggyTransaction[]> {
+    if (accountIds.length === 0) {
+      return [];
+    }
+    return this.getTransactionsByAccountIds(accountIds);
+  }
+
+  /**
+   * Carrega transações do cache
+   */
+  async getCachedTransactions(): Promise<PluggyTransaction[]> {
+    try {
+      const cached = await AsyncStorage.getItem('@fynance:pluggy_transactions');
+      return cached ? JSON.parse(cached) : [];
+    } catch (error) {
+      console.error('❌ Erro ao buscar transações do cache:', error);
+      return [];
+    }
+  }
+
+  /**
+   * Limpa o token de acesso e força nova autenticação
+   */
+  clearAccessToken(): void {
+    console.log('🔑 Limpando token de acesso...');
+    this.accessToken = null;
+    this.tokenExpiry = null;
+  }
+
+  /**
+   * Força nova autenticação
+   */
+  async forceReauth(): Promise<string> {
+    console.log('🔑 Forçando nova autenticação...');
+    this.clearAccessToken();
+    return await this.getAccessToken();
+  }
+
+  /**
+   * Testa a conectividade com a API do Pluggy
+   */
+  async testConnection(): Promise<boolean> {
+    try {
+      console.log('🧪 Testando conectividade com Pluggy...');
+      const token = await this.getAccessToken();
+      
+      // Teste simples - buscar items
+      const response = await fetch(`${PLUGGY_API_URL}/items`, {
+        method: 'GET',
+        headers: {
+          'X-API-KEY': token,
+          'Content-Type': 'application/json',
+        },
       });
-    });
-    
-    return accounts;
+
+      console.log('🧪 Status da conexão:', response.status);
+      
+      if (response.status === 200) {
+        console.log('✅ Conectividade OK');
+        return true;
+      } else {
+        const data = await response.json();
+        console.error('❌ Erro de conectividade:', data);
+        return false;
+      }
+    } catch (error) {
+      console.error('❌ Erro no teste de conectividade:', error);
+      return false;
+    }
   }
 }
 

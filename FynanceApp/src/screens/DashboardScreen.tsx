@@ -98,8 +98,97 @@ const DashboardScreen = () => {
   // Refresh control
   const handleRefresh = async () => {
     setIsRefreshing(true);
-    await loadOpenFinanceData();
-    setIsRefreshing(false);
+    try {
+      console.log('🔄 Dashboard: Iniciando atualização completa com polling...');
+      
+      // Tentar forçar nova autenticação se houver erro
+      let items;
+      try {
+        items = await pluggyService.getItems();
+      } catch (error: any) {
+        if (error.message && error.message.includes('Unauthorized')) {
+          console.log('🔄 Erro de autenticação detectado, tentando nova autenticação...');
+          await pluggyService.forceReauth();
+          items = await pluggyService.getItems();
+        } else {
+          throw error;
+        }
+      }
+      
+      if (items.length === 0) {
+        console.log('🔄 Nenhuma conta conectada para atualizar.');
+        setOpenFinanceAccounts([]);
+        setOpenFinanceTransactions([]);
+        setOwnerName('');
+        setIsRefreshing(false);
+        return;
+      }
+
+      console.log(`🔄 Disparando atualização para ${items.length} item(s)...`);
+      for (const item of items) {
+        await pluggyService.updateItem(item.id);
+      }
+
+      // Polling para verificar o status da atualização
+      const POLLING_INTERVAL = 5000; // 5 segundos
+      const MAX_WAIT_TIME = 60000; // 1 minuto
+      let elapsedTime = 0;
+
+      const poll = async (): Promise<boolean> => {
+        if (elapsedTime >= MAX_WAIT_TIME) {
+          console.warn('🔄 Polling timeout. Buscando dados mesmo assim.');
+          return true; // Sai do loop
+        }
+
+        const updatedItems = await pluggyService.getItems();
+        const isSyncing = updatedItems.some(item => item.status === 'UPDATING');
+
+        if (isSyncing) {
+          console.log(`🔄 Sincronizando... Verificando novamente em ${POLLING_INTERVAL / 1000}s`);
+          elapsedTime += POLLING_INTERVAL;
+          await new Promise(resolve => setTimeout(resolve, POLLING_INTERVAL));
+          return poll();
+        } else {
+          console.log('✅ Sincronização concluída!');
+          return true;
+        }
+      };
+
+      await poll();
+
+      // Buscar os dados atualizados
+      console.log('🔄 Buscando dados pós-sincronização...');
+      const accounts = await pluggyService.getAllAccounts();
+      setOpenFinanceAccounts(accounts);
+
+      if (accounts.length > 0) {
+        const accountIds = accounts.map(acc => acc.id);
+        console.log('🔄 Account IDs para buscar transações:', accountIds);
+        const transactions = await pluggyService.getAllTransactions(accountIds);
+        console.log('🔄 Transações carregadas:', transactions.length);
+        setOpenFinanceTransactions(transactions);
+
+        // @ts-ignore - owner pode existir
+        const owner = accounts[0].owner || '';
+        if (owner) {
+          const firstName = owner.split(' ')[0];
+          setOwnerName(firstName);
+        }
+      } else {
+        console.log('🔄 Nenhuma conta encontrada, carregando transações do cache...');
+        // Mesmo sem contas, tentar carregar transações do cache
+        const cachedTransactions = await pluggyService.getCachedTransactions();
+        setOpenFinanceTransactions(cachedTransactions);
+        setOwnerName('');
+      }
+
+      console.log('🔄 Atualização completa!');
+
+    } catch (error) {
+      console.error('🔄 Dashboard: Erro ao atualizar dados:', error);
+    } finally {
+      setIsRefreshing(false);
+    }
   };
 
   // Carregar dados na inicialização
