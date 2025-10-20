@@ -9,6 +9,7 @@ import SpendingLimit from '../components/dashboard/SpendingLimit';
 import TransactionItem from '../components/common/TransactionItem';
 import pluggyService, { PluggyAccount, PluggyTransaction } from '../services/pluggyService';
 import { RootStackParamList } from '../types';
+import { getTransactionCategory, getTransactionIcon } from '../utils/transactionUtils';
 
 type DashboardScreenNavigationProp = StackNavigationProp<RootStackParamList>;
 
@@ -396,33 +397,69 @@ const DashboardScreen = () => {
               <Text variant="titleMedium" style={styles.transactionsTitle}>
                 💸 Transações Recentes
               </Text>
-              {recentTransactions.map((transaction, index) => (
-                <React.Fragment key={transaction.id}>
-                  <View style={styles.transactionItem}>
-                    <View style={styles.transactionInfo}>
-                      <Text variant="bodyMedium" style={styles.transactionDescription}>
-                        {transaction.description}
-                      </Text>
-                      <Text variant="bodySmall" style={styles.transactionDate}>
-                        {new Date(transaction.date).toLocaleDateString('pt-BR')}
-                      </Text>
+              {recentTransactions.map((transaction, index) => {
+                const isDebit = transaction.amount < 0;
+                const category = getTransactionCategory(transaction.description, transaction.amount);
+                const icon = getTransactionIcon(transaction.description, transaction.amount);
+                
+                console.log('🔍 Dashboard - Transaction:', transaction.description, 'Category:', category);
+                
+                return (
+                  <React.Fragment key={transaction.id}>
+                    <View style={styles.transactionItem}>
+                      <View style={styles.transactionLeft}>
+                        <View style={[
+                          styles.transactionIconContainer,
+                          { backgroundColor: isDebit ? '#ffebee' : '#e8f5e9' }
+                        ]}>
+                          <IconButton
+                            icon={icon}
+                            size={18}
+                            iconColor={isDebit ? '#f44336' : '#4caf50'}
+                            style={styles.transactionIcon}
+                          />
+                        </View>
+                        <View style={styles.transactionInfo}>
+                          <Text variant="bodyMedium" style={styles.transactionDescription}>
+                            {transaction.description}
+                          </Text>
+                          <Text variant="bodySmall" style={styles.transactionDate}>
+                            {new Date(transaction.date).toLocaleDateString('pt-BR')}
+                          </Text>
+                          <View style={{
+                            backgroundColor: '#e3f2fd',
+                            paddingHorizontal: 8,
+                            paddingVertical: 2,
+                            borderRadius: 10,
+                            alignSelf: 'flex-start',
+                            marginTop: 4
+                          }}>
+                            <Text style={{ color: '#1976d2', fontSize: 10, fontWeight: '500' }}>
+                              {category}
+                            </Text>
+                          </View>
+                        </View>
+                      </View>
+                      <View style={styles.transactionRight}>
+                        <Text 
+                          variant="bodyMedium" 
+                          style={[
+                            styles.transactionAmount,
+                            { color: isDebit ? '#f44336' : '#4caf50' }
+                          ]}
+                          numberOfLines={1}
+                        >
+                          {isDebit ? '-' : '+'} {new Intl.NumberFormat('pt-BR', {
+                            style: 'currency',
+                            currency: 'BRL'
+                          }).format(Math.abs(transaction.amount))}
+                        </Text>
+                      </View>
                     </View>
-                    <Text 
-                      variant="bodyLarge" 
-                      style={[
-                        styles.transactionAmount,
-                        { color: transaction.amount < 0 ? '#f44336' : '#4caf50' }
-                      ]}
-                    >
-                      {new Intl.NumberFormat('pt-BR', {
-                        style: 'currency',
-                        currency: 'BRL'
-                      }).format(Math.abs(transaction.amount))}
-                    </Text>
-                  </View>
-                  {index < recentTransactions.length - 1 && <Divider />}
-                </React.Fragment>
-              ))}
+                    {index < recentTransactions.length - 1 && <Divider />}
+                  </React.Fragment>
+                );
+              })}
               
               {openFinanceTransactions.length > 5 && (
                 <Button
@@ -443,6 +480,9 @@ const DashboardScreen = () => {
       style={[styles.fab, { backgroundColor: theme.colors.primary }]}
       onPress={handleAddTransaction}
       label="Nova Transação"
+      labelTextColor="#FFFFFF"
+      color="white"
+      labelStyle={styles.fabLabel}
     />
   </>
   );
@@ -489,6 +529,7 @@ const styles = StyleSheet.create({
   transactionsCard: {
     marginTop: 16,
     marginBottom: 32,
+    marginHorizontal: 4,
   },
   transactionsTitle: {
     marginBottom: 16,
@@ -497,29 +538,73 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingVertical: 12,
+    paddingVertical: 16,
+    paddingHorizontal: 12,
+    minHeight: 80,
+  },
+  transactionLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+    marginRight: 8,
+    maxWidth: '70%',
+  },
+  transactionIconContainer: {
+    borderRadius: 18,
+    marginRight: 10,
+    width: 28,
+    height: 28,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  transactionIcon: {
+    margin: 0,
   },
   transactionInfo: {
     flex: 1,
+    minWidth: 0,
   },
   transactionDescription: {
     fontWeight: '500',
     color: '#333',
     marginBottom: 4,
+    fontSize: 13,
+    lineHeight: 16,
+    flexWrap: 'wrap',
   },
   transactionDate: {
     color: '#666',
-    fontSize: 12,
+    fontSize: 11,
+  },
+  transactionCategoryChip: {
+    alignSelf: 'flex-start',
+    height: 18,
+    marginTop: 2,
+  },
+  transactionCategoryText: {
+    fontSize: 9,
+  },
+  transactionRight: {
+    alignItems: 'flex-end',
+    justifyContent: 'center',
+    minWidth: 80,
+    maxWidth: '30%',
+    paddingLeft: 8,
   },
   transactionAmount: {
     fontWeight: 'bold',
-    marginLeft: 12,
+    fontSize: 14,
+    textAlign: 'right',
+    paddingRight: 4,
   },
   fab: {
     position: 'absolute',
     margin: 16,
     right: 0,
     bottom: 0,
+  },
+  fabLabel: {
+    color: 'white',
   },
   openFinanceCard: {
     marginBottom: 16,

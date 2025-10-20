@@ -46,10 +46,18 @@ class PluggyService {
    * Obtém token de acesso do Pluggy
    */
   async getAccessToken(): Promise<string> {
-    // Verifica se o token ainda é válido
-    if (this.accessToken && this.tokenExpiry && Date.now() < this.tokenExpiry) {
+    // Verifica se o token ainda é válido (com margem de 10 minutos para renovação)
+    const now = Date.now();
+    const tenMinutes = 10 * 60 * 1000; // 10 minutos em ms
+    
+    if (this.accessToken && this.tokenExpiry && now < (this.tokenExpiry - tenMinutes)) {
       console.log('🔑 Usando token em cache (válido)');
       return this.accessToken;
+    }
+    
+    if (this.accessToken && this.tokenExpiry && now >= this.tokenExpiry) {
+      console.log('🔑 Token expirado, renovando...');
+      this.clearAccessToken();
     }
 
     try {
@@ -78,8 +86,8 @@ class PluggyService {
       }
 
       this.accessToken = data.apiKey;
-      // Token expira em 24 horas (86400000 ms)
-      this.tokenExpiry = Date.now() + 86400000;
+      // Token expira em 2 horas (7200000 ms) - conforme documentação Pluggy
+      this.tokenExpiry = Date.now() + 7200000;
 
       if (!this.accessToken) {
         throw new Error('API Key não recebida do Pluggy');
@@ -134,6 +142,8 @@ class PluggyService {
   async getItems(): Promise<PluggyItem[]> {
     try {
       console.log('📦 Pluggy: Buscando items da API...');
+      
+      // Sempre obter um token fresco
       const token = await this.getAccessToken();
       console.log('📦 Token para getItems:', token ? token.substring(0, 10) + '...' : 'null');
       
@@ -145,7 +155,33 @@ class PluggyService {
         },
       });
 
-      console.log('📦 Response status:', response.status);
+      // Se der 401, tentar nova autenticação silenciosamente
+      if (response.status === 401) {
+        this.clearAccessToken();
+        const newToken = await this.getAccessToken();
+        
+        const retryResponse = await fetch(`${PLUGGY_API_URL}/items`, {
+          method: 'GET',
+          headers: {
+            'X-API-KEY': newToken,
+            'Content-Type': 'application/json',
+          },
+        });
+        
+        if (retryResponse.status === 401) {
+          // Silenciosamente retornar cache se ainda der 401
+          return this.getCachedItems();
+        }
+        
+        const retryData = await retryResponse.json();
+        const items = retryData.results || [];
+        console.log('📦 Items encontrados na API:', items.length);
+        
+        // Salvar no cache
+        await AsyncStorage.setItem('@fynance:pluggy_items', JSON.stringify(items));
+        return items;
+      }
+      
       const data = await response.json();
       console.log('📦 Response data:', data);
       
@@ -161,8 +197,7 @@ class PluggyService {
       await AsyncStorage.setItem('@fynance:pluggy_items', JSON.stringify(items));
       return items;
     } catch (error: any) {
-      console.error('❌ Erro em getItems:', error.message || error);
-      console.log('📦 Erro ao buscar da API, retornando cache...');
+      // Silenciosamente retornar cache em caso de erro
       return this.getCachedItems();
     }
   }
@@ -224,8 +259,7 @@ class PluggyService {
       await AsyncStorage.setItem('@fynance:pluggy_accounts', JSON.stringify(allAccounts));
       return allAccounts;
     } catch (error: any) {
-      console.error('❌ Erro em getAllAccounts:', error.message || error);
-      console.log('💰 Erro ao buscar da API, retornando cache...');
+      // Silenciosamente retornar cache em caso de erro
       return this.getCachedAccounts();
     }
   }
@@ -338,8 +372,7 @@ class PluggyService {
       await AsyncStorage.setItem('@fynance:pluggy_transactions', JSON.stringify(allTransactions));
       return allTransactions;
     } catch (error: any) {
-      console.error('❌ Erro em getTransactionsByAccountIds:', error.message || error);
-      console.log('💳 Erro ao buscar da API, retornando cache...');
+      // Silenciosamente retornar cache em caso de erro
       return this.getCachedTransactions();
     }
   }
@@ -383,6 +416,37 @@ class PluggyService {
     console.log('🔑 Forçando nova autenticação...');
     this.clearAccessToken();
     return await this.getAccessToken();
+  }
+
+  /**
+   * Verifica se o token atual é válido
+   */
+  async isTokenValid(): Promise<boolean> {
+    if (!this.accessToken) {
+      return false;
+    }
+
+    try {
+      console.log('🔍 Verificando se token é válido...');
+      const response = await fetch(`${PLUGGY_API_URL}/items`, {
+        method: 'GET',
+        headers: {
+          'X-API-KEY': this.accessToken,
+          'Content-Type': 'application/json',
+        },
+      });
+
+      if (response.status === 401) {
+        console.log('🔍 Token inválido (401)');
+        return false;
+      }
+
+      console.log('🔍 Token válido');
+      return true;
+    } catch (error) {
+      console.error('🔍 Erro ao verificar token:', error);
+      return false;
+    }
   }
 
   /**

@@ -3,6 +3,7 @@ import { View, StyleSheet, FlatList, RefreshControl } from 'react-native';
 import { Card, Text, Chip, Searchbar, useTheme, Divider, IconButton } from 'react-native-paper';
 import { useFocusEffect } from '@react-navigation/native';
 import pluggyService, { PluggyTransaction } from '../services/pluggyService';
+import { getTransactionCategory, getTransactionIcon } from '../utils/transactionUtils';
 
 const TransactionsScreen = () => {
   const theme = useTheme();
@@ -104,9 +105,14 @@ const TransactionsScreen = () => {
     .filter(t => t.amount > 0)
     .reduce((sum, t) => sum + t.amount, 0);
 
+
   // Renderizar item
   const renderTransaction = ({ item }: { item: PluggyTransaction }) => {
     const isDebit = item.amount < 0;
+    const category = getTransactionCategory(item.description, item.amount);
+    const icon = getTransactionIcon(item.description, item.amount);
+    
+    console.log('🔍 Transactions - Transaction:', item.description, 'Category:', category);
     
     return (
       <Card style={styles.transactionCard}>
@@ -117,8 +123,8 @@ const TransactionsScreen = () => {
               { backgroundColor: isDebit ? '#ffebee' : '#e8f5e9' }
             ]}>
               <IconButton
-                icon={isDebit ? 'arrow-down' : 'arrow-up'}
-                size={20}
+                icon={icon}
+                size={18}
                 iconColor={isDebit ? '#f44336' : '#4caf50'}
                 style={styles.icon}
               />
@@ -130,40 +136,31 @@ const TransactionsScreen = () => {
               <Text variant="bodySmall" style={styles.date}>
                 {formatDate(item.date)}
               </Text>
-              {item.category && (
-                <Chip
-                  style={styles.categoryChip}
-                  textStyle={styles.categoryText}
-                  compact
-                >
-                  {item.category}
-                </Chip>
-              )}
+              <View style={{
+                backgroundColor: '#e3f2fd',
+                paddingHorizontal: 8,
+                paddingVertical: 2,
+                borderRadius: 10,
+                alignSelf: 'flex-start',
+                marginTop: 4
+              }}>
+                <Text style={{ color: '#1976d2', fontSize: 10, fontWeight: '500' }}>
+                  {category}
+                </Text>
+              </View>
             </View>
           </View>
           <View style={styles.transactionRight}>
             <Text
-              variant="bodyLarge"
+              variant="bodyMedium"
               style={[
                 styles.amount,
                 { color: isDebit ? '#f44336' : '#4caf50' }
               ]}
+              numberOfLines={1}
             >
               {isDebit ? '-' : '+'} {formatCurrency(item.amount)}
             </Text>
-            <Chip
-              style={[
-                styles.statusChip,
-                { backgroundColor: item.type === 'DEBIT' ? '#ffebee' : '#e8f5e9' }
-              ]}
-              textStyle={{
-                color: item.type === 'DEBIT' ? '#f44336' : '#4caf50',
-                fontSize: 10
-              }}
-              compact
-            >
-              {item.type === 'DEBIT' ? 'Débito' : 'Crédito'}
-            </Chip>
           </View>
         </Card.Content>
       </Card>
@@ -314,57 +311,77 @@ const styles = StyleSheet.create({
     marginRight: 8,
   },
   listContent: {
-    padding: 16,
+    padding: 12,
     paddingTop: 8,
   },
   transactionCard: {
     marginBottom: 8,
+    marginHorizontal: 4,
   },
   transactionContent: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
+    paddingVertical: 16,
+    paddingHorizontal: 12,
   },
   transactionLeft: {
     flexDirection: 'row',
     alignItems: 'center',
     flex: 1,
+    marginRight: 8,
+    maxWidth: '70%',
   },
   iconContainer: {
-    borderRadius: 25,
-    marginRight: 12,
+    borderRadius: 18,
+    marginRight: 10,
+    width: 28,
+    height: 28,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   icon: {
     margin: 0,
   },
   transactionInfo: {
     flex: 1,
+    minWidth: 0,
   },
   description: {
     fontWeight: '500',
     marginBottom: 4,
+    fontSize: 13,
+    lineHeight: 16,
   },
   date: {
     color: '#666',
     marginBottom: 4,
+    fontSize: 11,
   },
   categoryChip: {
     alignSelf: 'flex-start',
-    height: 24,
-    marginTop: 4,
+    height: 18,
+    marginTop: 2,
   },
   categoryText: {
-    fontSize: 10,
+    fontSize: 9,
   },
   transactionRight: {
     alignItems: 'flex-end',
+    justifyContent: 'center',
+    minWidth: 80,
+    maxWidth: '30%',
+    paddingLeft: 8,
   },
   amount: {
     fontWeight: 'bold',
     marginBottom: 4,
+    fontSize: 14,
+    textAlign: 'right',
+    paddingRight: 4,
   },
   statusChip: {
-    height: 24,
+    height: 18,
   },
   emptyContainer: {
     padding: 32,
