@@ -276,9 +276,9 @@ const SmartAnalysisScreen = () => {
                           insight.priority === 'high' ? '#f44336' :
                           insight.priority === 'medium' ? '#ff9800' :
                           '#4caf50',
-                        fontSize: 10
+                        fontSize: 10,
+                        fontWeight: '500'
                       }}
-                      compact
                     >
                       {insight.priority === 'high' ? 'Alta' : insight.priority === 'medium' ? 'Média' : 'Baixa'}
                     </Chip>
@@ -379,12 +379,12 @@ const styles = StyleSheet.create({
   insightHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     marginBottom: 12,
   },
   insightHeaderLeft: {
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     flex: 1,
   },
   insightIcon: {
@@ -393,14 +393,16 @@ const styles = StyleSheet.create({
   },
   insightTitleContainer: {
     flex: 1,
+    paddingRight: 12,
   },
   insightTitle: {
     fontWeight: 'bold',
     marginBottom: 4,
+    flexWrap: 'wrap',
   },
   priorityChip: {
     alignSelf: 'flex-start',
-    height: 24,
+    marginTop: 4,
   },
   insightDescription: {
     color: '#666',
